@@ -30,15 +30,16 @@ const Sidebar = () => {
             icon: Users
         },
         {
-            path: '/dashboard',
-            label: 'Dashboard',
-            icon: LayoutDashboard
+            path: '/orders',
+            label: 'Orders',
+            icon: ShoppingBag
         },
         {
             label: 'Products',
             icon: Package,
             submenu: [
-                { path: '/product/add', label: 'All Products' },
+                { path: '/products', label: 'All Products' },
+                { path: '/product/add', label: 'Add New Product' },
                 { path: '/categories', label: 'Categories' },
             ]
         },

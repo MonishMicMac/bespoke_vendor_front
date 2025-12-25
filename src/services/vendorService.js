@@ -40,3 +40,62 @@ export const getVendorById = async (id) => {
     }
 };
 
+export const getProducts = async (page = 1, per_page = 20, search = '', category_id = '', sub_category_id = '') => {
+    try {
+        const response = await axiosInstance.get(`/product/list/web`, {
+            params: { page, per_page, search, category_id, sub_category_id }
+        });
+        return response.data;
+    } catch (error) {
+        console.error("Error fetching products:", error);
+        throw error;
+    }
+};
+
+export const getProductDetails = async (productId) => {
+    try {
+        const response = await axiosInstance.get(
+            `/show/product/web/${productId}`
+        );
+        return response.data;
+    } catch (error) {
+        console.error("Error fetching product details:", error);
+        throw error;
+    }
+};
+
+export const updateProduct = async (formData) => {
+    try {
+        const response = await axiosInstance.post('/update/product/web', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        return response.data;
+    } catch (error) {
+        console.error("Error updating product:", error);
+        throw error;
+    }
+};
+
+export const getOrders = async (page = 1, search = '') => {
+    try {
+        const response = await axiosInstance.get(`/orders/list`, {
+            params: { page, search }
+        });
+        return response.data;
+    } catch (error) {
+        console.error("Error fetching orders:", error);
+        throw error;
+    }
+};
+
+export const getOrderDetails = async (id) => {
+    try {
+        const response = await axiosInstance.get(`/order/detail`, {
+            params: { order_id: id }
+        });
+        return response.data;
+    } catch (error) {
+        console.error("Error fetching order details:", error);
+        throw error;
+    }
+};
