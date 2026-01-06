@@ -6,6 +6,11 @@ import axiosInstance from '../../api/axiosInstance';
 import toast, { Toaster } from 'react-hot-toast';
 import { getProductDetails, updateProduct } from '../../services/vendorService';
 
+// Step Components
+import Step1BasicInfo from './steps/Step1BasicInfo';
+import Step2ConfigMaterials from './steps/Step2ConfigMaterials';
+import Step3Summary from './steps/Step3Summary';
+
 const Product = () => {
     const { id } = useParams();
     const navigate = useNavigate();
@@ -16,12 +21,15 @@ const Product = () => {
     const [filteredSubCategories, setFilteredSubCategories] = useState([]);
     const [selectedCategory, setSelectedCategory] = useState('');
     const [selectedSubCategory, setSelectedSubCategory] = useState('');
+    const [wearTypes, setWearTypes] = useState([]);
+    const [selectedWearType, setSelectedWearType] = useState('');
     const [gender, setGender] = useState('Female');
-    const [isCustomizable, setIsCustomizable] = useState(1);
     const [isAlter, setIsAlter] = useState(0);
     const [alterCharge, setAlterCharge] = useState('');
     const [productName, setProductName] = useState('');
     const [productDescription, setProductDescription] = useState('');
+    const [rooms, setRooms] = useState([]);
+    const [selectedRoomId, setSelectedRoomId] = useState('');
 
     // --- Image States ---
     const [mainImage, setMainImage] = useState(null); // File: New Upload
@@ -33,16 +41,22 @@ const Product = () => {
     const [galleryImages, setGalleryImages] = useState([]); // Array of { file, preview } -> New Uploads
     const [existingGalleryImages, setExistingGalleryImages] = useState([]); // Array of { id, url }
     const [imagesToDelete, setImagesToDelete] = useState([]); // Array of IDs to delete
+    const [materialsToDelete, setMaterialsToDelete] = useState([]); // Array of material IDs to delete
+    const [addonsToDelete, setAddonsToDelete] = useState([]); // Array of addon IDs to delete
+    const [materialImagesToDelete, setMaterialImagesToDelete] = useState([]); // Array of material image IDs to delete
     const galleryInputRef = useRef(null);
     const fabricInputRef = useRef(null);
+    const isInitialLoad = useRef(true);
 
     // --- Complex Data States ---
-    const [fabrics, setFabrics] = useState([]); // { name, image (url), file (optional) }
-    const [isFabricModalOpen, setIsFabricModalOpen] = useState(false);
-    const [newFabricName, setNewFabricName] = useState('');
-    const [newFabricOneMeterPrice, setNewFabricOneMeterPrice] = useState('');
-    const [newFabricImage, setNewFabricImage] = useState(null);
-    const [newFabricImagePreview, setNewFabricImagePreview] = useState(null);
+    // Materials (New Structure)
+    // [{ id, identity, description, material_type_id, images: { main, front, back, left, right, extras: [] }, previews: { ... }, availability: { custom: true, ready: false } }]
+    const [fabrics, setFabrics] = useState([]);
+    // isCustomizable is now derived from fabrics availability
+    const isCustomizable = fabrics.some(f => f.availability?.custom) ? 1 : 0;
+    const [materialTypes, setMaterialTypes] = useState([]); // From API
+
+    // Old Fabric Modal states removed as we use inline cards now
 
     const [attributes, setAttributes] = useState([]); // { key, value }
     const [isAttributeModalOpen, setIsAttributeModalOpen] = useState(false);
@@ -57,9 +71,35 @@ const Product = () => {
     const [existingMeasurementImages, setExistingMeasurementImages] = useState({}); // Map ID -> URL
 
     const [selectedSizes, setSelectedSizes] = useState([]);
+    const [allStandardSizes, setAllStandardSizes] = useState([]);
     const [sizeNumbers, setSizeNumbers] = useState({}); // { 'XS': 32 }
     const [sizeMeasurements, setSizeMeasurements] = useState({}); // { 'S': { 'meas_1': 34 } }
     const [pricingData, setPricingData] = useState({}); // { 'Fabric_Size': { price, discount_price, stock } }
+    const [customPricingRows, setCustomPricingRows] = useState({}); // { fabricIdentity: ['XS', 'L'] }
+    const [readyPricingRows, setReadyPricingRows] = useState({}); // { fabricIdentity: ['XS', 'L'] }
+    const [tempFabAddSizes, setTempFabAddSizes] = useState({}); // { fabricIdentity: 'XS' } - for Add dropdown
+    const [autoFilledMeasurementIds, setAutoFilledMeasurementIds] = useState([]); // Track auto-filled measurements
+    const [subCategoryMappingExists, setSubCategoryMappingExists] = useState(false);
+    const [configActiveTab, setConfigActiveTab] = useState('materials'); // 'materials' or 'measurements'
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    // Multi-Step State
+    const [currentStep, setCurrentStep] = useState(1);
+    const steps = [
+        { id: 1, name: 'Basic Information', icon: 'edit_note' },
+        { id: 2, name: 'Product Configuration', icon: 'texture' },
+        { id: 3, name: 'Summary & Review', icon: 'visibility' }
+    ];
+
+    const handleNext = () => {
+        if (currentStep < 3) setCurrentStep(prev => prev + 1);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleBack = () => {
+        if (currentStep > 1) setCurrentStep(prev => prev - 1);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }; // Track if subcat mapping exists
 
     const ASSET_BASE_URL = 'http://3.7.112.78/bespoke/public'; // Helper
     const getFullImageUrl = (path) => {
@@ -73,221 +113,517 @@ const Product = () => {
     useEffect(() => {
         const fetchInitialData = async () => {
             try {
-                const apiBase = import.meta.env.VITE_API;
-                const [catRes, measureRes] = await Promise.all([
-                    axios.get(`${apiBase}/api/category/view`),
-                    axios.get(`${apiBase}/api/get/measurment`)
-                ]);
+                // Shared Dependencies for both Create and Edit
+                await fetchWearTypes();
+                await fetchMaterialTypes();
+                await fetchRooms();
 
-                if (catRes.data && catRes.data.categories) {
-                    setCategories(catRes.data.categories);
-
-                }
-                if (measureRes.data && measureRes.data.data) {
-                    setAvailableMeasurements(measureRes.data.data);
-
-                }
-
-                // If Edit Mode, Fetch Product Details AFTER cats/measures are loaded
                 if (isEditMode) {
-
-                    fetchProductData(id, catRes.data.categories);
+                    await fetchProductData(id);
+                } else {
+                    // Create Mode Defaults
+                    fetchMeasurementsByGender('Female');
+                    fetchCategoriesByGender('Female');
                 }
-
             } catch (error) {
                 console.error("Error fetching dependencies:", error);
+            } finally {
+                isInitialLoad.current = false;
             }
         };
         fetchInitialData();
     }, [id]);
 
-    // --- Populate Form for Edit ---
-    const fetchProductData = async (productId, availableCategories) => {
+    const fetchCategoriesByGender = async (genderName) => {
+        try {
+            const genderMapping = {
+                'Male': 1,
+                'Female': 2,
+                'Kids': 3,
+                'Unisex': 4,
+                'Others': 5
+            };
+            const categoryType = genderMapping[genderName] || 2;
 
+            // Using GET as requested
+            const res = await axiosInstance.get('/category/list', {
+                params: { category_type: categoryType }
+            });
+
+            if (res.data && res.data.categories) {
+                setCategories(res.data.categories);
+            } else {
+                setCategories([]);
+            }
+        } catch (error) {
+            console.error("Error fetching categories by gender:", error);
+            setCategories([]);
+        }
+    };
+
+    const fetchWearTypes = async () => {
+        try {
+            const res = await axiosInstance.get('/wear-types');
+            if (res.data && res.data.data) {
+                setWearTypes(res.data.data);
+            }
+        } catch (error) {
+            console.error("Error fetching wear types:", error);
+        }
+    };
+
+    const fetchRooms = async () => {
+        try {
+            const apiBase = import.meta.env.VITE_API;
+            const res = await axios.get(`${apiBase}/api/rooms?page=1&search=&per_page=50`);
+
+            // Extract rooms from varied potential structures (direct array, .rooms.data, .data)
+            let roomsList = [];
+            if (Array.isArray(res.data)) {
+                roomsList = res.data;
+            } else if (res.data?.rooms?.data) {
+                roomsList = res.data.rooms.data;
+            } else if (res.data?.data) {
+                roomsList = res.data.data;
+            }
+
+            setRooms(roomsList);
+        } catch (error) {
+            console.error("Error fetching rooms:", error);
+        }
+    };
+
+    const fetchMaterialTypes = async () => {
+        try {
+            const res = await axiosInstance.get('/materials');
+            if (res.data && res.data.data) {
+                setMaterialTypes(res.data.data);
+            }
+        } catch (error) {
+            console.error("Error fetching material types:", error);
+        }
+    };
+
+    const fetchMeasurementsByGender = async (genderName, shouldAutoSelect = false) => {
+        try {
+            const apiBase = import.meta.env.VITE_API;
+            const genderMapping = {
+                'Male': 1,
+                'Female': 2,
+                'Kids': 3,
+                'Unisex': 4,
+                'Others': 5
+            };
+            const genderId = genderMapping[genderName] || 2;
+            // Updated URL provided by user
+            const url = `${apiBase}/api/get/measurment/web?gender=${genderId}`;
+            const measureRes = await axios.get(url);
+
+            if (measureRes.data && measureRes.data.data) {
+                const measurements = measureRes.data.data;
+                setAvailableMeasurements(measurements);
+
+                if (shouldAutoSelect) {
+                    // Auto Fill Values & Select Sizes
+                    const newSizeMeasurements = {};
+                    const sizesFound = new Set();
+
+                    measurements.forEach(m => {
+                        let details = m.size_details;
+                        if (typeof details === 'string') {
+                            try { details = JSON.parse(details); } catch (e) { details = null; }
+                        }
+
+                        if (details) {
+                            Object.entries(details).forEach(([size, value]) => {
+                                sizesFound.add(size);
+                                if (!newSizeMeasurements[size]) newSizeMeasurements[size] = {};
+                                newSizeMeasurements[size][`meas_${m.id}`] = value;
+                            });
+                        }
+                    });
+
+                    if (sizesFound.size > 0) {
+                        const sortedSizes = [...sizesFound];
+                        setSelectedSizes(sortedSizes);
+                        setAllStandardSizes(sortedSizes);
+                        setSizeMeasurements(prev => ({ ...prev, ...newSizeMeasurements }));
+                    }
+                }
+            }
+        } catch (error) {
+            console.error("Error fetching measurements by gender:", error);
+        }
+    };
+
+    const fetchMeasurementsBySubCategory = async (subCatId) => {
+        try {
+            const apiBase = import.meta.env.VITE_API;
+            const res = await axios.get(`${apiBase}/api/measurements/by-subcategory/${subCatId}`);
+
+            if (res.data && res.data.status && res.data.data) {
+                const measurements = res.data.data;
+                if (measurements && measurements.length > 0) {
+                    setAvailableMeasurements(measurements);
+                    setSubCategoryMappingExists(true);
+
+                    // Auto Select All Measurements if Ready-Made (Standard mapping)
+                    if (isCustomizable === 0) {
+                        const allMeasIds = measurements.map(m => m.id);
+                        setSelectedMeasurementIds(allMeasIds);
+                    }
+
+                    // Auto Fill Values & Select Sizes
+                    const newSizeMeasurements = {};
+                    const sizesFound = new Set();
+
+                    measurements.forEach(m => {
+                        let details = m.size_details;
+                        if (typeof details === 'string') {
+                            try { details = JSON.parse(details); } catch (e) { details = null; }
+                        }
+
+                        if (details) {
+                            Object.entries(details).forEach(([size, value]) => {
+                                sizesFound.add(size);
+                                if (!newSizeMeasurements[size]) newSizeMeasurements[size] = {};
+                                newSizeMeasurements[size][`meas_${m.id}`] = value;
+                            });
+                        }
+                    });
+
+                    if (sizesFound.size > 0) {
+                        const sortedSizes = [...sizesFound];
+                        setSelectedSizes(sortedSizes);
+                        setAllStandardSizes(sortedSizes);
+                        setSizeMeasurements(prev => ({ ...prev, ...newSizeMeasurements }));
+                    }
+                } else {
+                    setSubCategoryMappingExists(false);
+                    setAvailableMeasurements([]);
+                }
+            } else {
+                setSubCategoryMappingExists(false);
+                setAvailableMeasurements([]);
+            }
+        } catch (error) {
+            console.error("Error fetching measurements by subcategory:", error);
+            setSubCategoryMappingExists(false);
+            setAvailableMeasurements([]);
+        }
+    };
+
+    const fetchMeasurementsByWearType = async (wearTypeId) => {
+        try {
+            const apiBase = import.meta.env.VITE_API;
+            const res = await axiosInstance.get(`/measurements/by-type/${wearTypeId}`);
+
+            if (res.data && res.data.status && res.data.data) {
+                const measurements = res.data.data;
+                if (measurements && measurements.length > 0) {
+                    setAvailableMeasurements(measurements);
+
+                    // Auto Select All if Ready-Made
+                    if (isCustomizable === 0) {
+                        const allMeasIds = measurements.map(m => m.id);
+                        setSelectedMeasurementIds(allMeasIds);
+                    }
+
+                    const newSizeMeasurements = {};
+                    const sizesFound = new Set();
+
+                    measurements.forEach(m => {
+                        if (m.size_details) {
+                            const details = typeof m.size_details === 'string' ? JSON.parse(m.size_details) : m.size_details;
+                            Object.entries(details).forEach(([size, value]) => {
+                                sizesFound.add(size);
+                                if (!newSizeMeasurements[size]) newSizeMeasurements[size] = {};
+                                newSizeMeasurements[size][`meas_${m.id}`] = value;
+                            });
+                        }
+                    });
+
+                    if (sizesFound.size > 0) {
+                        const foundSizesList = [...sizesFound];
+                        setSelectedSizes(foundSizesList);
+                        setAllStandardSizes(foundSizesList);
+                        setSizeMeasurements(prev => ({ ...prev, ...newSizeMeasurements }));
+                    } else {
+                        setAllStandardSizes(AVAILABLE_SIZES);
+                        if (isCustomizable === 1) {
+                            setSelectedSizes(AVAILABLE_SIZES);
+                        }
+                    }
+                } else {
+                    setAvailableMeasurements([]);
+                }
+            } else {
+                setAvailableMeasurements([]);
+            }
+        } catch (error) {
+            console.error("Error fetching measurements by wear type:", error);
+            setAvailableMeasurements([]);
+        }
+    };
+
+    useEffect(() => {
+        // Skip during initial data load to avoid overwriting existing selections
+        if (isInitialLoad.current) return;
+
+        // In Edit Mode, we should NOT wipe selections based on standard mappings 
+        // unless the user specifically CHANGES the category/subcategory.
+        // We'll skip this logic if everything was loaded by fetchProductData and hasn't changed.
+
+        if (selectedSubCategory) {
+            if (subCategoryMappingExists) {
+                const allIds = availableMeasurements.map(m => m.id);
+                if (isCustomizable === 0) {
+                    if (allIds.length > 0) {
+                        if (selectedMeasurementIds.length !== allIds.length) {
+                            setSelectedMeasurementIds(allIds);
+                        }
+                        // Ensure values are fetched for all standard measurements if switching to ready-made
+                        const activeSizes = allStandardSizes.length > 0 ? allStandardSizes : AVAILABLE_SIZES;
+                        allIds.forEach(mId => {
+                            activeSizes.forEach(size => {
+                                if (!sizeMeasurements[size]?.[`meas_${mId}`]) {
+                                    fetchMeasurementValue(mId, size);
+                                }
+                            });
+                        });
+                    }
+                } else {
+                    if (allIds.length > 0 && selectedMeasurementIds.length === allIds.length) {
+                        // Only clear if we are SURE it was a ready-made auto-select and not a loaded custom list
+                        // For simplicity, if mapping exists and it's custom, we let user manually pick
+                    }
+                }
+            } else {
+                if (isCustomizable === 1) {
+                    fetchMeasurementsByGender(gender, true);
+                } else if (!isEditMode) {
+                    // Only clear if NOT in Edit Mode or if user intentionally changed subcat
+                    setAvailableMeasurements([]);
+                    setSelectedMeasurementIds([]);
+                }
+            }
+        } else if (isCustomizable === 1) {
+            fetchMeasurementsByGender(gender, true);
+        } else if (!isEditMode) {
+            setAvailableMeasurements([]);
+            setSelectedMeasurementIds([]);
+        }
+    }, [selectedSubCategory, subCategoryMappingExists, isCustomizable, gender, availableMeasurements.length]);
+
+    // --- Populate Form for Edit ---
+    const fetchProductData = async (productId) => {
         const toastId = toast.loading('Loading product data...');
         try {
             const data = await getProductDetails(productId);
-
-
-            // Check if it's wrapped in data.data or product key
             const p = data.product || data.data || data;
 
-
             if (!p || !p.product_name) {
-
+                toast.error("Product details not found");
+                return;
             }
 
+            // 1. Basic Information
             setProductName(p.product_name || '');
             setProductDescription(p.description || '');
+            // Normalize room_id to Number if it's not empty, to match room.id in the list
+            setSelectedRoomId(p.room_id ? Number(p.room_id) : '');
 
-
-            // Normalize Gender (API "male" -> UI "Male")
+            // 2. Gender & Categories
             if (p.gender) {
-                const normalizedGender = p.gender.charAt(0).toUpperCase() + p.gender.slice(1).toLowerCase();
-                setGender(normalizedGender);
-
+                const normalized = p.gender.charAt(0).toUpperCase() + p.gender.slice(1).toLowerCase();
+                setGender(normalized);
+                // Await to ensure availableMeasurements is populated before we potentially overwrite/process it
+                await fetchMeasurementsByGender(normalized);
+                await fetchCategoriesByGender(normalized);
             }
 
-            setIsCustomizable(Number(p.is_customizable) || 0);
             setIsAlter(Number(p.is_alter) || 0);
             setAlterCharge(p.alter_charge || '');
 
-            // Categories (Handle nested objects from API)
             const catId = p.category_id || p.category?.id;
             const subCatId = p.sub_category_id || p.subcategory?.id;
 
-            setSelectedCategory(catId);
-
-            // Find subcats immediately for correct dropdown population
-            if (catId && availableCategories && Array.isArray(availableCategories)) {
-                const cat = availableCategories.find(c => c.id == catId);
-                if (cat) {
-                    setFilteredSubCategories(cat.subcategories || []);
+            if (catId) {
+                await fetchSubCategories(catId);
+                setSelectedCategory(catId);
+                // Important: Set subcategory AFTER the list is fetched
+                if (subCatId) {
                     setSelectedSubCategory(subCatId);
-                } else {
-
+                    await fetchMeasurementsBySubCategory(subCatId);
                 }
             }
 
-            // Main Image
+            const wearTypeId = p.wear_type_id || p.wear_type?.id;
+            if (wearTypeId) setSelectedWearType(wearTypeId);
+
+            // 3. Images
             if (p.main_image) {
                 const url = getFullImageUrl(p.main_image);
                 setExistingMainImage(url);
                 setMainImagePreview(url);
             }
 
-            // Gallery Handling
-            const rawGallery = p.all_images || [];
             const structuredGallery = p.images || [];
+            const galleryToUse = structuredGallery.map(img => ({
+                id: img.id,
+                url: getFullImageUrl(img.image_url || img.img_path)
+            }));
+            setExistingGalleryImages(galleryToUse);
 
-            let galleryToUse = [];
-            if (structuredGallery.length > 0) {
-                // Use structured images if they have some form of identifier or just URL
-                galleryToUse = structuredGallery.map((img, idx) => ({
-                    id: img.id || img.image_url, // Fallback to URL if no ID
-                    url: getFullImageUrl(img.image_url)
-                }));
-            } else {
-                // Fallback to flat string array
-                galleryToUse = rawGallery.map((url, idx) => ({
-                    id: url,
-                    url: getFullImageUrl(url)
-                }));
-            }
-
-            // Filter out the main image from the gallery
-            const mainImageUrl = getFullImageUrl(p.main_image);
-            const filteredGallery = galleryToUse.filter(item => item.url !== mainImageUrl);
-
-            // De-duplicate by URL
-            const uniqueGallery = [];
-            const seenUrls = new Set();
-            filteredGallery.forEach(item => {
-                if (!seenUrls.has(item.url)) {
-                    seenUrls.add(item.url);
-                    uniqueGallery.push(item);
-                }
-            });
-            setExistingGalleryImages(uniqueGallery);
-
-
-            // Fabrics & Pricing (API uses product_materials)
-            const materials = p.product_materials || p.productMaterials || [];
+            // 4. Materials (Fabrics) & Pricing
+            const materials = p.product_materials || [];
             if (materials.length > 0) {
-                const mappedFabrics = materials.map(m => ({
-                    name: m.materail_name,
-                    image: getFullImageUrl(m.img_path),
-                    file: null
-                }));
+                const mappedFabrics = materials.map(m => {
+                    const identity = m.material_identity || m.identity || '';
+                    const imgs = m.images || [];
+
+                    // material_type_id logic: 0: custom, 1: ready, 2: both
+                    const mTypeId = Number(m.material_type_id);
+                    const isCustom = mTypeId === 0 || mTypeId === 2;
+                    const isReady = mTypeId === 1 || mTypeId === 2;
+
+                    return {
+                        id: m.id,
+                        identity: identity,
+                        description: m.description || '',
+                        material_type: m.material_name || m.material_type || '',
+                        existingImages: imgs.map(img => ({
+                            id: img.id,
+                            url: getFullImageUrl(img.img_path),
+                            file: null // Will hold the new file if replaced
+                        })),
+                        newImages: [], // Array of { file, preview } for newly added images
+                        previews: {
+                            // Previews for legacy/pose logic if still needed elsewhere, but we'll focus on the arrays
+                            main: getFullImageUrl(imgs[0]?.img_path || m.img_path),
+                            front: getFullImageUrl(imgs[1]?.img_path),
+                            back: getFullImageUrl(imgs[2]?.img_path),
+                            left: getFullImageUrl(imgs[3]?.img_path),
+                            right: getFullImageUrl(imgs[4]?.img_path),
+                            extras: imgs.slice(5).map(img => getFullImageUrl(img.img_path))
+                        },
+                        availability: {
+                            custom: isCustom,
+                            ready: isReady
+                        },
+                        addons: (m.addons || m.product_addons || []).map(a => ({
+                            id: a.id,
+                            name: a.name || '',
+                            amount: a.amount || a.price || '',
+                            preview: getFullImageUrl(a.images?.[0]?.img_path || a.img_path || a.image_url || a.image)
+                        }))
+                    };
+                });
                 setFabrics(mappedFabrics);
 
                 const pricing = {};
-                materials.forEach(mat => {
-                    if (mat.prices) {
+                const rRows = {};
+                const cRows = {};
+
+                mappedFabrics.forEach((f, fIdx) => {
+                    const mat = materials[fIdx];
+                    const identity = f.id; // Use our mapped unique ID
+                    if (mat && mat.prices) {
                         mat.prices.forEach(pr => {
-                            const key = `${mat.materail_name}_${pr.size}`;
+                            const type = (String(pr.price_type).toLowerCase() === 'custom' || pr.price_type_id == 0) ? 'custom' : 'ready';
+                            const key = `${identity}_${pr.size}_${type}`;
+
                             pricing[key] = {
+                                id: pr.id,
                                 price: pr.actual_price,
                                 discount_price: pr.discount_price,
-                                stock: pr.stock || 0
+                                stock: pr.qty || 0
                             };
+
+                            if (type === 'ready') {
+                                if (!rRows[identity]) rRows[identity] = [];
+                                if (!rRows[identity].includes(pr.size)) rRows[identity].push(pr.size);
+                            } else {
+                                if (!cRows[identity]) cRows[identity] = [];
+                                if (!cRows[identity].includes(pr.size)) cRows[identity].push(pr.size);
+                            }
                         });
                     }
                 });
                 setPricingData(pricing);
+                setReadyPricingRows(rRows);
+                setCustomPricingRows(cRows);
             }
 
-            // Measurements Selection & Guides (Use product_sizes)
-            if (p.product_sizes) {
+            // 5. Measurements (Matrix parsing from product_measurements)
+            if (p.product_measurements && p.product_measurements.length > 0) {
                 const measIds = new Set();
                 const sizesSet = new Set();
                 const sMeasurements = {};
+                const loadedAvailableMeasurements = [];
 
-                p.product_sizes.forEach(ps => {
-                    if (ps.measurement_id) measIds.add(Number(ps.measurement_id));
-                    if (ps.size) {
-                        sizesSet.add(ps.size);
-                        if (!sMeasurements[ps.size]) sMeasurements[ps.size] = {};
-                        sMeasurements[ps.size][`meas_${ps.measurement_id}`] = ps.details_value;
+                p.product_measurements.forEach(pm => {
+                    if (pm.measurement_id) measIds.add(Number(pm.measurement_id));
+
+                    if (pm.measurement) {
+                        loadedAvailableMeasurements.push(pm.measurement);
                     }
+
+                    const matrix = pm.value || {};
+                    Object.entries(matrix).forEach(([size, measValues]) => {
+                        sizesSet.add(size);
+                        if (!sMeasurements[size]) sMeasurements[size] = {};
+
+                        const val = measValues[`meas_${pm.measurement_id}`];
+                        if (val !== undefined) {
+                            sMeasurements[size][`meas_${pm.measurement_id}`] = val;
+                        }
+                    });
                 });
 
+                if (loadedAvailableMeasurements.length > 0) {
+                    setSubCategoryMappingExists(true); // Mark as mapping existing so UI shows standard fields if needed
+                }
+
                 setSelectedMeasurementIds([...measIds]);
-                setSelectedSizes([...sizesSet]);
+                setSelectedSizes([...sizesSet].sort());
                 setSizeMeasurements(sMeasurements);
             }
 
-            // Reference Images for Measurements
-            if (p.measurement_references || p.measurementReferences) {
-                const refs = p.measurement_references || p.measurementReferences;
-                const mImages = {};
-                refs.forEach(ref => {
-                    if (ref.measurement_id && ref.image_url) {
-                        mImages[ref.measurement_id] = {
-                            preview: getFullImageUrl(ref.image_url),
-                            file: null
-                        };
-                    }
-                });
-                setMeasurementImages(mImages);
+            // 6. Attributes
+            if (p.product_details && Array.isArray(p.product_details)) {
+                const loadedAttributes = p.product_details.map(d => ({
+                    key: d.detail || d.key || '',
+                    value: d.value || ''
+                }));
+                setAttributes(loadedAttributes);
             }
 
-            // Size Numbers (if specifically provided or derive if possible)
-            const sizeNums = p.product_size_numbers || p.size_numbers_json || [];
-            if (sizeNums.length > 0) {
-                const nums = {};
-                const sizesFromMapping = [];
-                sizeNums.forEach(sn => {
-                    nums[sn.size] = sn.value;
-                    sizesFromMapping.push(sn.size);
-                });
-                setSizeNumbers(nums);
-
-                // Ensure these sizes are also in selectedSizes
-                setSelectedSizes(prev => {
-                    const combined = new Set([...prev, ...sizesFromMapping]);
-                    return [...combined];
-                });
-            }
-
-            // Attributes
-            const attrData = p.attributes || p.product_info || [];
-            if (attrData.length > 0) {
-                setAttributes(attrData.map(a => ({
-                    key: a.detail || a.info_key || '',
-                    value: a.value || a.info_value || ''
-                })));
-            }
-
-            toast.success('Data loaded', { id: toastId });
-        } catch (err) {
-            console.error('Fetch error:', err);
-            toast.error('Failed to load product', { id: toastId });
+            toast.success('Data loaded successfully', { id: toastId });
+        } catch (error) {
+            console.error('Fetch error:', error);
+            toast.error('Failed to load product for editing', { id: toastId });
         }
     };
 
 
-    // --- HANDLERS ---
+    const handleSubCategoryChange = (e) => {
+        const subCatId = e.target.value;
+        setSelectedSubCategory(subCatId);
+        if (subCatId) {
+            fetchMeasurementsBySubCategory(subCatId);
+        }
+    };
+
+    const handleWearTypeChange = (e) => {
+        const typeId = e.target.value;
+        setSelectedWearType(typeId);
+        if (isCustomizable && typeId) {
+            fetchMeasurementsByWearType(typeId);
+        }
+    };
+
+
     const handleMainImageChange = (e) => {
         const file = e.target.files[0];
         if (file) {
@@ -329,25 +665,123 @@ const Product = () => {
     };
 
     // ... (Keep existing Fabric/Attribute/Measure handlers) ...
-    // Fabric Handlers
-    const handleFabricImageChange = (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            setNewFabricImage(file);
-            setNewFabricImagePreview(URL.createObjectURL(file));
-        }
+    // Material Handlers
+    const handleAddMaterial = () => {
+        const newMaterial = {
+            id: Date.now(), // Temp ID
+            identity: '',
+            description: '',
+            material_type: '',
+            existingImages: [],
+            newImages: [],
+            previews: { main: null, front: null, back: null, left: null, right: null, extras: [] },
+            availability: { custom: true, ready: false },
+            addons: [], // Each material has its own addons
+            force_custom_mode: false // For Select/Input toggle
+        };
+        setFabrics([...fabrics, newMaterial]);
+        // Note: isCustomizable will now trigger the useEffect to fetch gender measurements if needed
     };
 
-    const handleAddFabric = () => {
-        if (!newFabricName) return;
-        setFabrics([...fabrics, {
-            name: newFabricName,
-            oneMeterPrice: newFabricOneMeterPrice,
-            image: newFabricImagePreview,
-            file: newFabricImage
-        }]);
-        setIsFabricModalOpen(false);
-        setNewFabricName(''); setNewFabricImage(null); setNewFabricImagePreview(null);
+    const handleRemoveMaterial = (index) => {
+        const mat = fabrics[index];
+        if (mat && mat.id && !String(mat.id).startsWith('temp_')) {
+            setMaterialsToDelete(prev => [...prev, mat.id]);
+        }
+        setFabrics(prev => prev.filter((_, i) => i !== index));
+    };
+
+    const handleMaterialChange = (index, field, value) => {
+        setFabrics(prev => {
+            const newFabrics = [...prev];
+            newFabrics[index] = { ...newFabrics[index], [field]: value };
+            return newFabrics;
+        });
+    };
+
+    const toggleMaterialAvailability = (index, type) => {
+        // Fetch measurements if we enable custom for the first time across all materials
+        if (type === 'custom' && !fabrics[index].availability.custom) {
+            const alreadyHasCustom = fabrics.some((f, i) => i !== index && f.availability?.custom);
+            if (!alreadyHasCustom && selectedWearType) {
+                fetchMeasurementsByWearType(selectedWearType);
+            }
+        }
+
+        setFabrics(prev => {
+            const newFabrics = [...prev];
+            // Properly copy the item to avoid mutation
+            newFabrics[index] = {
+                ...newFabrics[index],
+                availability: {
+                    ...newFabrics[index].availability,
+                    [type]: !newFabrics[index].availability[type]
+                }
+            };
+            return newFabrics;
+        });
+    };
+
+    const handleMaterialImageChange = (index, pose, e) => {
+        const files = Array.from(e.target.files);
+        if (files.length === 0) return;
+
+        setFabrics(prev => {
+            const newFabrics = [...prev];
+            const mat = { ...newFabrics[index] };
+
+            if (pose === 'add_new') {
+                // Adding to newImages (completely new upload)
+                const additions = files.map(file => ({
+                    file,
+                    preview: URL.createObjectURL(file)
+                }));
+                mat.newImages = [...(mat.newImages || []), ...additions];
+            } else if (typeof pose === 'number') {
+                // Replacing an existing image slot
+                const file = files[0];
+                const updatedExisting = [...mat.existingImages];
+                updatedExisting[pose] = {
+                    ...updatedExisting[pose],
+                    file,
+                    url: URL.createObjectURL(file) // Show preview in place
+                };
+                mat.existingImages = updatedExisting;
+            } else if (pose === 'replace_new' && e.subIndex !== undefined) {
+                // Replacing a previously added new image
+                const file = files[0];
+                const updatedNew = [...mat.newImages];
+                updatedNew[e.subIndex] = {
+                    file,
+                    preview: URL.createObjectURL(file)
+                };
+                mat.newImages = updatedNew;
+            }
+
+            newFabrics[index] = mat;
+            return newFabrics;
+        });
+        e.target.value = '';
+    };
+
+    const removeMaterialImage = (index, listType, imgIdx) => {
+        setFabrics(prev => {
+            const newFabrics = [...prev];
+            const mat = { ...newFabrics[index] };
+
+            if (listType === 'existing') {
+                const img = mat.existingImages[imgIdx];
+                if (img?.id) {
+                    setMaterialImagesToDelete(prevDel => [...prevDel, img.id]);
+                }
+                mat.existingImages = mat.existingImages.filter((_, i) => i !== imgIdx);
+            } else {
+                mat.newImages = mat.newImages.filter((_, i) => i !== imgIdx);
+            }
+
+            newFabrics[index] = mat;
+            return newFabrics;
+        });
     };
 
     const handleAddAttribute = () => {
@@ -357,8 +791,94 @@ const Product = () => {
         setNewMetaKey(''); setNewMetaValue('');
     };
 
+    // Addon Handlers (Nested in Material)
+    const handleAddAddon = (matIndex) => {
+        setFabrics(prev => {
+            const next = [...prev];
+            const mat = { ...next[matIndex] };
+            mat.addons = [...(mat.addons || []), { id: Date.now(), name: '', amount: '', image: null, preview: null }];
+            next[matIndex] = mat;
+            return next;
+        });
+    };
+
+    const handleRemoveAddon = (matIndex, addonIndex) => {
+        const mat = fabrics[matIndex];
+        const addon = mat.addons[addonIndex];
+        if (addon && addon.id && !String(addon.id).startsWith('temp_') && !isNaN(Number(addon.id))) {
+            setAddonsToDelete(prev => [...prev, addon.id]);
+        }
+        setFabrics(prev => {
+            const next = [...prev];
+            const mat = { ...next[matIndex] };
+            mat.addons = mat.addons.filter((_, i) => i !== addonIndex);
+            next[matIndex] = mat;
+            return next;
+        });
+    };
+
+    const handleAddonChange = (matIndex, addonIndex, field, value) => {
+        setFabrics(prev => {
+            const next = [...prev];
+            const mat = { ...next[matIndex] };
+            const nextAddons = [...mat.addons];
+            nextAddons[addonIndex] = { ...nextAddons[addonIndex], [field]: value };
+            mat.addons = nextAddons;
+            next[matIndex] = mat;
+            return next;
+        });
+    };
+
+    const handleAddonImageChange = (matIndex, addonIndex, e) => {
+        const file = e.target.files[0];
+        if (file) {
+            setFabrics(prev => {
+                const next = [...prev];
+                const mat = { ...next[matIndex] };
+                const nextAddons = [...mat.addons];
+                nextAddons[addonIndex] = { ...nextAddons[addonIndex], image: file, preview: URL.createObjectURL(file) };
+                mat.addons = nextAddons;
+                next[matIndex] = mat;
+                return next;
+            });
+        }
+    };
+
+    const fetchMeasurementValue = async (mId, size) => {
+        try {
+            const apiBase = import.meta.env.VITE_API;
+            const res = await axios.get(`${apiBase}/api/measurements/get-value?measurement_id=${mId}&size_name=${size}`);
+            if (res.data && res.data.status && res.data.value) {
+                setSizeMeasurements(prev => ({
+                    ...prev,
+                    [size]: { ...prev[size], [`meas_${mId}`]: res.data.value }
+                }));
+                setAutoFilledMeasurementIds(prev => prev.includes(mId) ? prev : [...prev, mId]);
+            }
+        } catch (error) {
+            console.error("Error fetching measurement value:", error);
+        }
+    };
+
     const toggleMeasurement = (id) => {
-        setSelectedMeasurementIds(prev => prev.includes(id) ? prev.filter(mid => mid !== id) : [...prev, id]);
+        const isSelected = selectedMeasurementIds.includes(id);
+        if (!isSelected) {
+            setSelectedMeasurementIds(prev => [...prev, id]);
+
+            // If customizable, auto-select all sizes if none are selected
+            if (isCustomizable === 1 && selectedSizes.length === 0) {
+                setSelectedSizes(AVAILABLE_SIZES);
+            }
+
+            // If customizable, we want to fetch for all standard sizes even if not "selected" in the chips
+            const activeSizes = allStandardSizes.length > 0 ? allStandardSizes : (isCustomizable === 1 ? AVAILABLE_SIZES : selectedSizes);
+            if (activeSizes.length > 0) {
+                activeSizes.forEach(size => fetchMeasurementValue(id, size));
+            }
+        } else {
+            setSelectedMeasurementIds(prev => prev.filter(mid => mid !== id));
+            setAutoFilledMeasurementIds(prev => prev.filter(mid => mid !== id));
+        }
     };
 
     const handleMeasurementImageUpload = (e, id) => {
@@ -371,7 +891,15 @@ const Product = () => {
     };
 
     const toggleSize = (size) => {
-        setSelectedSizes(prev => prev.includes(size) ? prev.filter(s => s !== size) : [...prev, size]);
+        const isSelected = selectedSizes.includes(size);
+        if (!isSelected) {
+            setSelectedSizes(prev => [...prev, size]);
+            if (selectedMeasurementIds.length > 0) {
+                selectedMeasurementIds.forEach(mId => fetchMeasurementValue(mId, size));
+            }
+        } else {
+            setSelectedSizes(prev => prev.filter(s => s !== size));
+        }
     };
 
     const handleMeasurementChange = (size, measId, value) => {
@@ -381,8 +909,8 @@ const Product = () => {
         }));
     };
 
-    const handlePricingChange = (fabricName, size, field, value) => {
-        const key = `${fabricName}_${size}`;
+    const handlePricingChange = (materialId, size, field, value, type) => {
+        const key = `${materialId}_${size}_${type}`;
         setPricingData(prev => ({
             ...prev,
             [key]: { ...prev[key], [field]: value }
@@ -393,8 +921,92 @@ const Product = () => {
         setSizeNumbers(prev => ({ ...prev, [size]: value }));
     };
 
+    const handleAddCustomRow = (materialId, size) => {
+        if (!size) return;
+        setCustomPricingRows(prev => {
+            const current = prev[materialId] || [];
+            if (current.includes(size)) return prev;
+            return { ...prev, [materialId]: [...current, size] };
+        });
+    };
+
+    const handleRemoveCustomRow = (materialId, size) => {
+        setCustomPricingRows(prev => {
+            const current = prev[materialId] || [];
+            return { ...prev, [materialId]: current.filter(s => s !== size) };
+        });
+        const key = `${materialId}_${size}_custom`;
+        setPricingData(prev => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
+    };
+
+    const handleAddReadyRow = (materialId, size) => {
+        if (!size) return;
+        setReadyPricingRows(prev => {
+            const current = prev[materialId] || [];
+            if (current.includes(size)) return prev;
+            return { ...prev, [materialId]: [...current, size] };
+        });
+    };
+
+    const handleRemoveReadyRow = (materialId, size) => {
+        setReadyPricingRows(prev => {
+            const current = prev[materialId] || [];
+            return { ...prev, [materialId]: current.filter(s => s !== size) };
+        });
+        const key = `${materialId}_${size}_ready`;
+        setPricingData(prev => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
+    };
+
+    // Sync Rows from existing pricing data on load
+    useEffect(() => {
+        if (Object.keys(pricingData).length > 0) {
+            // Sync Custom
+            setCustomPricingRows(prev => {
+                if (Object.keys(prev).length > 0) return prev;
+                const newRows = {};
+                let found = false;
+                Object.keys(pricingData).forEach(key => {
+                    if (key.endsWith('_custom')) {
+                        const parts = key.split('_'); parts.pop();
+                        const size = parts.pop();
+                        const identity = parts.join('_');
+                        if (!newRows[identity]) newRows[identity] = [];
+                        if (!newRows[identity].includes(size)) { newRows[identity].push(size); found = true; }
+                    }
+                });
+                return found ? newRows : prev;
+            });
+            // Sync Ready
+            setReadyPricingRows(prev => {
+                if (Object.keys(prev).length > 0) return prev;
+                const newRows = {};
+                let found = false;
+                Object.keys(pricingData).forEach(key => {
+                    if (key.endsWith('_ready')) {
+                        const parts = key.split('_'); parts.pop();
+                        const size = parts.pop();
+                        const identity = parts.join('_');
+                        if (!newRows[identity]) newRows[identity] = [];
+                        if (!newRows[identity].includes(size)) { newRows[identity].push(size); found = true; }
+                    }
+                });
+                return found ? newRows : prev;
+            });
+        }
+    }, [pricingData]);
+
 
     const handleSubmit = async () => {
+        if (isSubmitting) return;
+        setIsSubmitting(true);
         const toastId = toast.loading(isEditMode ? 'Updating product...' : 'Publishing product...');
 
         try {
@@ -407,7 +1019,9 @@ const Product = () => {
             formData.append('description', productDescription);
             formData.append('category_id', selectedCategory);
             formData.append('sub_category_id', selectedSubCategory);
+            formData.append('room_id', selectedRoomId);
             formData.append('gender', gender);
+            formData.append('wear_type_id', selectedWearType);
             formData.append('is_customizable', isCustomizable);
             formData.append('is_alter', isAlter);
             formData.append('alter_charge', alterCharge || 0);
@@ -425,23 +1039,103 @@ const Product = () => {
                 formData.append(`remove_gallery_ids[${index}]`, delId);
             });
 
-            // 3. Materials
-            const materialsData = fabrics.map(f => ({ name: f.name }));
-            formData.append('materials_json', JSON.stringify(materialsData));
+            // Deleted Materials
+            materialsToDelete.forEach((delId, index) => {
+                formData.append(`remove_material_ids[${index}]`, delId);
+            });
 
-            fabrics.forEach((f, index) => {
-                if (f.file) formData.append(`fabrics[${index}][image]`, f.file);
+            // Deleted Addons
+            addonsToDelete.forEach((delId, index) => {
+                formData.append(`remove_addon_ids[${index}]`, delId);
+            });
+
+            // Material Images to Delete
+            if (materialImagesToDelete.length > 0) {
+                formData.append('remove_image_ids', JSON.stringify(materialImagesToDelete));
+                formData.append('removed_image', JSON.stringify(materialImagesToDelete));
+            }
+
+            // 3. Materials (Advanced)
+            const materialsPayload = fabrics.map(m => ({
+                // If ID is temp timestamp (Date.now() > 10^12) or starts with temp_, send null
+                id: (String(m.id).startsWith('temp_') || (typeof m.id === 'number' && m.id > 1000000000000)) ? null : m.id,
+                identity: m.identity,
+                description: m.description,
+                material_type: m.material_type, // Send Name
+                material_type_id: ((m.availability?.custom && m.availability?.ready) ? 2 : (m.availability?.custom ? 0 : 1)), // 0: custom, 1: ready, 2: both
+                availability: m.availability,
+                addons: (m.addons || []).map(a => ({
+                    id: (String(a.id).startsWith('temp_') || isNaN(Number(a.id)) || (typeof a.id === 'number' && a.id > 1000000000000)) ? null : a.id,
+                    name: a.name,
+                    amount: a.amount || a.price
+                }))
+            }));
+            formData.append('materials_json', JSON.stringify(materialsPayload));
+
+            fabrics.forEach((m, index) => {
+                const isExistingMaterial = m.id && !String(m.id).startsWith('temp_') && !(typeof m.id === 'number' && m.id > 1000000000000);
+
+                if (isExistingMaterial) {
+                    // 1. Handle Replaced Existing Images (changed_image[id])
+                    (m.existingImages || []).forEach(img => {
+                        if (img.file) {
+                            formData.append(`materials[${index}][changed_image][${img.id}]`, img.file);
+                        }
+                    });
+
+                    // 2. Handle New Extra Images (extra_image[idx])
+                    (m.newImages || []).forEach((imgObj, eIdx) => {
+                        if (imgObj.file) {
+                            formData.append(`materials[${index}][extra_image][${eIdx}]`, imgObj.file);
+                        }
+                    });
+                } else {
+                    // 3. Handle Completely New Material Images
+                    // Use pose names for the first 5, then extras
+                    const allNewFiles = [
+                        ...(m.existingImages || []).map(i => i.file).filter(Boolean),
+                        ...(m.newImages || []).map(i => i.file).filter(Boolean)
+                    ];
+
+                    allNewFiles.forEach((file, fIdx) => {
+                        const poseNames = ['main', 'front', 'back', 'left', 'right'];
+                        const key = poseNames[fIdx] || `extra_${fIdx}`;
+                        formData.append(`materials[${index}][${key}]`, file);
+                    });
+                }
+
+                // Addons Images
+                if (m.addons && m.addons.length > 0) {
+                    m.addons.forEach((addon, aIdx) => {
+                        if (addon.image) {
+                            formData.append(`materials[${index}][addons][${aIdx}]`, addon.image);
+                        }
+                    });
+                }
             });
 
             // 4. Pricing
+            // 4. Pricing
             const pricingArray = Object.keys(pricingData).map(key => {
-                const [fabricName, size] = key.split('_');
+                const parts = key.split('_');
+                const type = parts.pop();
+                const size = parts.pop();
+                const materialId = parts.join('_');
+
+                // Resolve ID back to the user-entered identity for backend compatibility
+                const mat = fabrics.find(f => String(f.id) === materialId);
+                const fabricName = mat ? mat.identity : materialId;
+
                 return {
+                    id: pricingData[key].id || null,
+                    material_id: (String(materialId).startsWith('temp_') || (typeof materialId === 'number' && materialId > 1000000000000)) ? null : materialId,
                     fabric: fabricName,
                     size: size,
+                    type: type,
+                    price_type_id: type === 'custom' ? 0 : 1,
                     price: pricingData[key].price,
                     discount_price: pricingData[key].discount_price || 0,
-                    stock: pricingData[key].stock || 0
+                    stock: type === 'custom' ? 0 : (pricingData[key].stock || 0)
                 };
             });
             formData.append('prices_json', JSON.stringify(pricingArray));
@@ -466,6 +1160,8 @@ const Product = () => {
             const details = attributes.map(a => ({ detail: a.key, value: a.value }));
             formData.append('details_json', JSON.stringify(details));
 
+
+
             const apiCall = isEditMode ? updateProduct : axiosInstance.post;
             const url = isEditMode ? null : '/add/product/web'; // UpdateProduct handles its own URL
 
@@ -481,10 +1177,25 @@ const Product = () => {
             } else {
                 toast.error(response.message || 'Operation failed', { id: toastId });
             }
-
         } catch (error) {
             console.error(error);
             toast.error('Server error', { id: toastId });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const fetchSubCategories = async (categoryId) => {
+        try {
+            const res = await axiosInstance.get(`/subcategories/by-category/${categoryId}`);
+            if (res.data && res.data.data) {
+                setFilteredSubCategories(res.data.data);
+            } else {
+                setFilteredSubCategories([]);
+            }
+        } catch (error) {
+            console.error("Error fetching subcategories:", error);
+            setFilteredSubCategories([]);
         }
     };
 
@@ -494,8 +1205,7 @@ const Product = () => {
         setSelectedSubCategory('');
 
         if (catId) {
-            const category = categories.find(cat => cat.id == catId);
-            setFilteredSubCategories(category?.subcategories || []);
+            fetchSubCategories(catId);
         } else {
             setFilteredSubCategories([]);
         }
@@ -533,602 +1243,147 @@ const Product = () => {
             </nav>
 
             <main className="container mx-auto max-w-7xl px-4 sm:px-6 py-8">
-                <div className="mb-8">
-                    <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Create New Product</h1>
-                    <p className="text-slate-500 dark:text-slate-400">Create and manage customizable clothing products with ease.</p>
+                <div className="mb-12">
+                    <div className="flex items-center justify-between max-w-4xl mx-auto relative">
+                        {/* Progress Line */}
+                        <div className="absolute top-1/2 left-0 w-full h-0.5 bg-slate-200 dark:bg-slate-700 -translate-y-1/2 z-0"></div>
+                        <div
+                            className="absolute top-1/2 left-0 h-0.5 bg-rose-500 -translate-y-1/2 z-0 transition-all duration-500"
+                            style={{ width: `${((currentStep - 1) / (steps.length - 1)) * 100}%` }}
+                        ></div>
+
+                        {steps.map((step) => (
+                            <div key={step.id} className="relative z-10 flex flex-col items-center">
+                                <div
+                                    className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-500 ${currentStep >= step.id ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30 rotate-[360deg]' : 'bg-white dark:bg-slate-800 text-slate-400 border-2 border-slate-200 dark:border-slate-700'}`}
+                                >
+                                    <span className="material-symbols-outlined">{step.icon}</span>
+                                </div>
+                                <div className={`absolute top-full mt-3 text-[10px] font-black uppercase tracking-tighter whitespace-nowrap transition-colors duration-300 ${currentStep >= step.id ? 'text-rose-500' : 'text-slate-400'}`}>
+                                    {step.name}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* LEFT COLUMN (2/3) */}
-                    <div className="lg:col-span-2 space-y-8">
+                <div className="mt-16 mb-24">
+                    {currentStep === 1 && (
+                        <Step1BasicInfo
+                            productName={productName} setProductName={setProductName}
+                            gender={gender} setGender={setGender}
+                            categories={categories} selectedCategory={selectedCategory} handleCategoryChange={handleCategoryChange}
+                            filteredSubCategories={filteredSubCategories} selectedSubCategory={selectedSubCategory} handleSubCategoryChange={handleSubCategoryChange}
+                            productDescription={productDescription} setProductDescription={setProductDescription}
+                            fetchMeasurementsByGender={fetchMeasurementsByGender} fetchCategoriesByGender={fetchCategoriesByGender}
+                            wearTypes={wearTypes} selectedWearType={selectedWearType} handleWearTypeChange={handleWearTypeChange}
+                            rooms={rooms} selectedRoomId={selectedRoomId} setSelectedRoomId={setSelectedRoomId}
+                        />
+                    )}
 
-                        {/* 1. Basic Information */}
-                        <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="p-2 bg-rose-500/10 rounded-lg text-rose-500">
-                                    <span className="material-symbols-outlined">edit_note</span>
-                                </div>
-                                <div>
-                                    <h2 className="text-lg font-bold text-slate-900 dark:text-white">Basic Information</h2>
-                                    <p className="text-xs text-slate-500 dark:text-slate-400">Core product details and categorization</p>
-                                </div>
-                            </div>
+                    {currentStep === 2 && (
+                        <Step2ConfigMaterials
+                            isAlter={isAlter} setIsAlter={setIsAlter} alterCharge={alterCharge} setAlterCharge={setAlterCharge}
+                            fabrics={fabrics} handleAddMaterial={handleAddMaterial} handleRemoveMaterial={handleRemoveMaterial} handleMaterialChange={handleMaterialChange}
+                            toggleMaterialAvailability={toggleMaterialAvailability}
+                            materialTypes={materialTypes} handleMaterialImageChange={handleMaterialImageChange} removeMaterialImage={removeMaterialImage}
+                            handleAddAddon={handleAddAddon} handleRemoveAddon={handleRemoveAddon} handleAddonChange={handleAddonChange} handleAddonImageChange={handleAddonImageChange}
+                            attributes={attributes} setAttributes={setAttributes} setIsAttributeModalOpen={setIsAttributeModalOpen}
+                            // Pricing & Stock Props
+                            AVAILABLE_SIZES={AVAILABLE_SIZES}
+                            sizeNumbers={sizeNumbers}
+                            tempFabAddSizes={tempFabAddSizes}
+                            setTempFabAddSizes={setTempFabAddSizes}
+                            readyPricingRows={readyPricingRows}
+                            handleAddReadyRow={handleAddReadyRow}
+                            handleRemoveReadyRow={handleRemoveReadyRow}
+                            pricingData={pricingData}
+                            handlePricingChange={handlePricingChange}
+                            // Measurement Props (Moved to Step 2 Tabs)
+                            availableMeasurements={availableMeasurements}
+                            selectedMeasurementIds={selectedMeasurementIds}
+                            toggleMeasurement={toggleMeasurement}
+                            isCustomizable={isCustomizable}
+                            selectedSizes={selectedSizes}
+                            toggleSize={toggleSize}
+                            sizeMeasurements={sizeMeasurements}
+                            handleMeasurementChange={handleMeasurementChange}
+                            activeTab={configActiveTab}
+                            setActiveTab={setConfigActiveTab}
+                        />
+                    )}
 
-                            <div className="space-y-5">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Product Name</label>
-                                    <input
-                                        value={productName}
-                                        onChange={(e) => setProductName(e.target.value)}
-                                        className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all placeholder:text-slate-400"
-                                        placeholder="e.g. Premium Cotton T-Shirt"
-                                        type="text"
-                                    />
-                                </div>
+                    {currentStep === 3 && (
+                        <Step3Summary
+                            productName={productName}
+                            categories={categories}
+                            selectedCategory={selectedCategory}
+                            filteredSubCategories={filteredSubCategories}
+                            selectedSubCategory={selectedSubCategory}
+                            fabrics={fabrics}
+                            pricingData={pricingData}
+                            sizeNumbers={sizeNumbers}
+                            AVAILABLE_SIZES={AVAILABLE_SIZES}
+                            availableMeasurements={availableMeasurements}
+                            selectedMeasurementIds={selectedMeasurementIds}
+                            measurementImages={measurementImages}
+                            sizeMeasurements={sizeMeasurements}
+                            selectedSizes={selectedSizes}
+                            handleFinalSubmit={handleSubmit}
+                            isSubmitting={isSubmitting}
+                            rooms={rooms}
+                            selectedRoomId={selectedRoomId}
+                            attributes={attributes}
+                            onEditSection={(section) => {
+                                setCurrentStep(2);
+                                setConfigActiveTab(section === 'measurements' ? 'measurements' : 'materials');
+                            }}
+                        />
+                    )}
+                </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Category</label>
-                                        <select
-                                            value={selectedCategory}
-                                            onChange={handleCategoryChange}
-                                            className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all appearance-none"
-                                        >
-                                            <option value="">Select Category</option>
-                                            {categories.map(cat => (
-                                                <option key={cat.id} value={cat.id}>{cat.name}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Sub-Category</label>
-                                        <select
-                                            value={selectedSubCategory}
-                                            onChange={(e) => setSelectedSubCategory(e.target.value)}
-                                            disabled={!selectedCategory}
-                                            className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            <option value="">Select Sub-Category</option>
-                                            {filteredSubCategories.map(sub => (
-                                                <option key={sub.id} value={sub.id}>{sub.name}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                </div>
+                {/* Navigation Controls */}
+                <div className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-t border-slate-200 dark:border-slate-700 p-4 z-40">
+                    <div className="container mx-auto max-w-7xl flex items-center justify-between">
+                        <button
+                            onClick={handleBack}
+                            disabled={currentStep === 1}
+                            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold transition-all ${currentStep === 1 ? 'text-slate-300 cursor-not-allowed' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+                        >
+                            <span className="material-symbols-outlined">arrow_back</span>
+                            Back
+                        </button>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Gender</label>
-                                    <div className="flex gap-3">
-                                        {['Female', 'Male', 'Unisex'].map(g => (
-                                            <button
-                                                key={g}
-                                                type="button"
-                                                onClick={() => setGender(g)}
-                                                className={`px-6 py-2 rounded-full text-sm font-medium transition ${gender === g ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20' : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-600 hover:bg-slate-50'}`}
-                                            >
-                                                {g}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Description</label>
-                                    <textarea
-                                        value={productDescription}
-                                        onChange={(e) => setProductDescription(e.target.value)}
-                                        className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all placeholder:text-slate-400"
-                                        rows="4"
-                                    ></textarea>
-                                </div>
-                            </div>
-                        </section>
-
-                        {/* 2. Product Images */}
-                        <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="p-2 bg-rose-500/10 rounded-lg text-rose-500">
-                                    <span className="material-symbols-outlined">image</span>
-                                </div>
-                                <div>
-                                    <h2 className="text-lg font-bold text-slate-900 dark:text-white">Product Images</h2>
-                                    <p className="text-xs text-slate-500 dark:text-slate-400">High-resolution shots</p>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                {/* Main Image */}
-                                <div className="col-span-2 relative group">
-                                    <input
-                                        type="file"
-                                        ref={mainImageInputRef}
-                                        onChange={handleMainImageChange}
-                                        className="hidden"
-                                        accept="image/*"
-                                    />
-                                    <div
-                                        onClick={() => !mainImage && mainImageInputRef.current.click()}
-                                        className={`w-full aspect-[4/3] rounded-lg border-2 border-dashed ${mainImage ? 'border-rose-500/30 bg-rose-500/5' : 'border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 hover:border-rose-500 hover:bg-rose-500/5 cursor-pointer'} flex items-center justify-center overflow-hidden transition relative`}
-                                    >
-                                        {mainImagePreview ? (
-                                            <>
-                                                <img src={mainImagePreview} alt="Main" className="w-full h-full object-contain p-4" />
-                                                <button
-                                                    onClick={removeMainImage}
-                                                    className="absolute top-2 right-2 p-1 bg-white rounded-full text-slate-400 hover:text-red-500 shadow-sm border border-slate-200"
-                                                >
-                                                    <span className="material-symbols-outlined text-sm">close</span>
-                                                </button>
-                                            </>
-                                        ) : (
-                                            <div className="flex flex-col items-center">
-                                                <span className="material-symbols-outlined text-4xl text-slate-400 mb-2">cloud_upload</span>
-                                                <span className="text-xs text-slate-500 font-medium">Upload Main Image</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* Add More / Gallery */}
-                                <div className="grid grid-cols-2 gap-4 md:flex md:flex-col">
-                                    {/* Existing Gallery Images */}
-                                    {existingGalleryImages.map((img) => (
-                                        <div key={img.id} className="relative aspect-square rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden group">
-                                            <img src={img.url} alt="Gallery" className="w-full h-full object-cover" />
-                                            <button
-                                                onClick={(e) => removeExistingGalleryImage(img.id, e)}
-                                                className="absolute top-1 right-1 p-0.5 bg-white rounded-full text-slate-400 hover:text-red-500 shadow-sm opacity-0 group-hover:opacity-100 transition"
-                                            >
-                                                <span className="material-symbols-outlined text-[12px]">close</span>
-                                            </button>
-                                            <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] text-center py-0.5 opacity-0 group-hover:opacity-100 transition">
-                                                Existing
-                                            </div>
-                                        </div>
-                                    ))}
-
-                                    {/* New Gallery Images */}
-                                    {galleryImages.map((img, idx) => (
-                                        <div key={`new-${idx}`} className="relative aspect-square rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                                            <img src={img.preview} alt="Gallery" className="w-full h-full object-cover" />
-                                            <button
-                                                onClick={(e) => removeGalleryImage(idx, e)}
-                                                className="absolute top-1 right-1 p-0.5 bg-white rounded-full text-slate-400 hover:text-red-500 shadow-sm"
-                                            >
-                                                <span className="material-symbols-outlined text-[12px]">close</span>
-                                            </button>
-                                            <div className="absolute bottom-0 inset-x-0 bg-green-500/80 text-white text-[10px] text-center py-0.5">
-                                                New
-                                            </div>
-                                        </div>
-                                    ))}
-
-                                    <input
-                                        type="file"
-                                        multiple
-                                        ref={galleryInputRef}
-                                        onChange={handleGalleryImageChange}
-                                        className="hidden"
-                                        accept="image/*"
-                                    />
-                                    <div
-                                        onClick={() => galleryInputRef.current.click()}
-                                        className="w-full aspect-square rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 flex flex-col items-center justify-center cursor-pointer hover:border-rose-500 dark:hover:border-rose-500 hover:bg-rose-500/5 transition"
-                                    >
-                                        <span className="material-symbols-outlined text-3xl text-slate-400 mb-1">add_photo_alternate</span>
-                                        <span className="text-[10px] text-slate-500 font-medium">Add More</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </section>
-
-                        {/* 3. Measurements & Sizes */}
-                        <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
-                            {/* ... Measurements UI Rewrite matching reference ... */}
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="p-2 bg-rose-500/10 rounded-lg text-rose-500">
-                                    <span className="material-symbols-outlined">straighten</span>
-                                </div>
-                                <div>
-                                    <h2 className="text-lg font-bold text-slate-900 dark:text-white">Measurements & Sizes</h2>
-                                    <p className="text-xs text-slate-500 dark:text-slate-400">Select applicable measurements</p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-6">
-                                <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Select Required Measurements</h3>
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                                    {availableMeasurements.map(meas => {
-                                        const isSelected = selectedMeasurementIds.includes(meas.id);
-                                        return (
-                                            <div
-                                                key={meas.id}
-                                                onClick={() => toggleMeasurement(meas.id)}
-                                                className={`relative p-3 rounded-xl border transition cursor-pointer ${isSelected ? 'border-2 border-rose-500 bg-rose-500/5' : 'border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:border-slate-300'}`}
-                                            >
-                                                <div className="flex items-center gap-2 mb-2">
-                                                    <div className={`w-4 h-4 rounded flex items-center justify-center text-white ${isSelected ? 'bg-rose-500' : 'border border-slate-300 dark:border-slate-500'}`}>
-                                                        {isSelected && <span className="material-symbols-outlined text-[10px] font-bold">check</span>}
-                                                    </div>
-                                                    <span className={`text-xs font-bold ${isSelected ? 'text-slate-900 dark:text-white' : 'text-slate-700 dark:text-slate-300'}`}>{meas.name}</span>
-                                                </div>
-                                                {/* Image Placeholder logic matching reference */}
-                                                <div className="flex gap-2">
-                                                    <input
-                                                        type="file"
-                                                        id={`file-${meas.id}`}
-                                                        className="hidden"
-                                                        accept="image/*"
-                                                        onChange={(e) => handleMeasurementImageUpload(e, meas.id)}
-                                                    />
-                                                    <div
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            document.getElementById(`file-${meas.id}`).click();
-                                                        }}
-                                                        className="w-full bg-white dark:bg-slate-700 rounded border border-slate-200 dark:border-slate-600 aspect-[3/4] flex items-center justify-center text-[10px] text-slate-400 overflow-hidden relative group"
-                                                    >
-                                                        {measurementImages[meas.id] ? (
-                                                            <>
-                                                                <img src={measurementImages[meas.id].preview} className="w-full h-full object-cover" />
-                                                                <button
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        removeMeasurementImage(meas.id);
-                                                                    }}
-                                                                    className="absolute top-1 right-1 p-0.5 bg-white rounded-full text-red-500 shadow-sm opacity-0 group-hover:opacity-100 transition"
-                                                                >
-                                                                    <span className="material-symbols-outlined text-[12px]">close</span>
-                                                                </button>
-                                                            </>
-                                                        ) : (
-                                                            meas.img_path ? (
-                                                                <img src={meas.img_path.startsWith('http') ? meas.img_path : `${import.meta.env.VITE_API}/${meas.img_path}`} className="w-full h-full object-cover" />
-                                                            ) : (
-                                                                <div className="flex flex-col items-center">
-                                                                    <span className="material-symbols-outlined text-lg mb-1">add_a_photo</span>
-                                                                    <span>Ref Img</span>
-                                                                </div>
-                                                            )
-                                                        )}
-                                                        {!measurementImages[meas.id] && (
-                                                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition text-white font-medium text-[10px]">
-                                                                Upload
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-
-                                {/* Sizes */}
-                                <div>
-                                    <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">Select Available Sizes</h3>
-                                    <div className="flex flex-wrap gap-2">
-                                        {AVAILABLE_SIZES.map(size => (
-                                            <button
-                                                key={size}
-                                                onClick={() => toggleSize(size)}
-                                                className={`w-10 h-10 rounded-lg flex items-center justify-center text-xs font-bold transition ${selectedSizes.includes(size) ? 'bg-rose-500 text-white shadow-sm' : 'bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50'}`}
-                                            >
-                                                {size}
-                                            </button>
-                                        ))}
-                                    </div>
-
-                                    {/* Standard Size Values Table */}
-                                    {selectedSizes.length > 0 && (
-                                        <div className="mt-6">
-                                            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3 flex items-center gap-2">
-                                                <span className="material-symbols-outlined text-rose-500 text-sm">settings_input_component</span>
-                                                Size Value Mapping (Standard)
-                                            </h3>
-                                            <div className="bg-white dark:bg-slate-800 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 shadow-sm w-full max-w-md">
-                                                <table className="w-full text-sm border-collapse">
-                                                    <thead>
-                                                        <tr className="bg-slate-700 dark:bg-slate-900">
-                                                            <th className="px-4 py-2.5 text-white font-bold text-left border-r border-white/10">Label (Size)</th>
-                                                            <th className="px-4 py-2.5 text-white font-bold text-left">Standard Value (e.g. 36, 40)</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {selectedSizes.map((size, idx) => (
-                                                            <tr key={size} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'} dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700 last:border-0`}>
-                                                                <td className="px-4 py-3 font-bold text-slate-700 dark:text-slate-300 border-r border-slate-100 dark:border-slate-700">{size}</td>
-                                                                <td className="px-4 py-2">
-                                                                    <input
-                                                                        type="number"
-                                                                        placeholder="Enter numeric size..."
-                                                                        value={sizeNumbers[size] || ''}
-                                                                        onChange={(e) => handleSizeNumberChange(size, e.target.value)}
-                                                                        className="w-full px-3 py-1.5 text-sm bg-white dark:bg-slate-700 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-600 rounded focus:border-rose-500 outline-none transition-all font-bold"
-                                                                    />
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Fill Measurements Table */}
-                                {selectedSizes.length > 0 && selectedMeasurementIds.length > 0 && (
-                                    <div className="bg-white dark:bg-slate-800 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 shadow-sm mt-4">
-                                        <div className="overflow-x-auto">
-                                            <table className="w-full text-sm border-collapse">
-                                                <thead>
-                                                    <tr className="bg-slate-600 dark:bg-slate-700 border-b border-slate-600 dark:border-slate-700">
-                                                        <th className="px-6 py-4 text-white font-bold text-center border-r border-slate-500/50 last:border-r-0 min-w-[100px]">Size</th>
-                                                        {selectedMeasurementIds.map(mid => {
-                                                            const m = availableMeasurements.find(am => am.id === mid);
-                                                            return (
-                                                                <th key={mid} className="px-6 py-4 text-white font-bold text-center border-r border-slate-500/50 last:border-r-0 min-w-[120px]">
-                                                                    {m?.name || 'Point'}
-                                                                </th>
-                                                            );
-                                                        })}
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {selectedSizes.map((size, idx) => (
-                                                        <tr
-                                                            key={size}
-                                                            className={`${idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50 dark:bg-slate-800/50'} border-b border-slate-100 dark:border-slate-700 last:border-b-0 group hover:bg-rose-50/30 dark:hover:bg-rose-500/5 transition-colors`}
-                                                        >
-                                                            <td className="px-6 py-4 font-bold text-slate-700 dark:text-slate-300 text-center border-r border-slate-100 dark:border-slate-700 last:border-r-0">
-                                                                <div className="flex flex-col">
-                                                                    <span className="text-lg">{sizeNumbers[size] || size}</span>
-                                                                    {sizeNumbers[size] && <span className="text-[10px] text-slate-400 font-normal">({size})</span>}
-                                                                </div>
-                                                            </td>
-                                                            {selectedMeasurementIds.map(mid => (
-                                                                <td key={mid} className="px-4 py-2 text-center border-r border-slate-100 dark:border-slate-700 last:border-r-0">
-                                                                    <div className="relative group/input">
-                                                                        <input
-                                                                            type="number"
-                                                                            step="0.1"
-                                                                            value={sizeMeasurements[size]?.[`meas_${mid}`] || ''}
-                                                                            onChange={(e) => handleMeasurementChange(size, mid, e.target.value)}
-                                                                            placeholder="--"
-                                                                            className="w-full max-w-[100px] px-2 py-2 bg-transparent text-center text-sm font-semibold text-slate-900 dark:text-white outline-none border border-transparent focus:border-rose-500/50 rounded-lg transition-all"
-                                                                        />
-                                                                        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-slate-200 dark:bg-slate-600 group-focus-within/input:w-full group-focus-within/input:bg-rose-500 transition-all rounded-full"></div>
-                                                                    </div>
-                                                                </td>
-                                                            ))}
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </section>
-
-                        {/* 4. Pricing & Stock */}
-                        <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="p-2 bg-rose-500/10 rounded-lg text-rose-500">
-                                    <span className="material-symbols-outlined">inventory_2</span>
-                                </div>
-                                <div>
-                                    <h2 className="text-lg font-bold text-slate-900 dark:text-white">Pricing & Stock</h2>
-                                    <p className="text-xs text-slate-500 dark:text-slate-400">Manage Price and Qty per Fabric & Size</p>
-                                </div>
-                            </div>
-
-                            {fabrics.length > 0 && selectedSizes.length > 0 ? (
-                                <div className="bg-white dark:bg-slate-800 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 shadow-sm mt-4">
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-sm border-collapse">
-                                            <thead>
-                                                <tr className="bg-slate-700 dark:bg-slate-900 border-b border-slate-700">
-                                                    <th className="px-6 py-4 text-white font-bold text-left border-r border-white/10 last:border-r-0">Fabric</th>
-                                                    <th className="px-6 py-4 text-white font-bold text-center border-r border-white/10 last:border-r-0">Size</th>
-                                                    <th className="px-6 py-4 text-white font-bold text-center border-r border-white/10 last:border-r-0">Actual Price ($)</th>
-                                                    <th className="px-6 py-4 text-white font-bold text-center border-r border-white/10 last:border-r-0">Discount Price ($)</th>
-                                                    <th className="px-6 py-4 text-white font-bold text-center last:border-r-0">Stock (Qty)</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {fabrics.map((fabric) => (
-                                                    selectedSizes.map((size, sIdx) => {
-                                                        const key = `${fabric.name}_${size}`;
-                                                        return (
-                                                            <tr key={key} className={`${sIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50'} dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700 last:border-0 hover:bg-rose-50/30 transition-colors`}>
-                                                                <td className="px-6 py-4 border-r border-slate-100 dark:border-slate-700 last:border-r-0">
-                                                                    <div className="flex items-center gap-3">
-                                                                        {fabric.image ? <img src={fabric.image} className="w-8 h-8 rounded-full border border-slate-200 object-cover shadow-sm" /> : <div className="w-8 h-8 rounded-full bg-slate-200"></div>}
-                                                                        <span className="font-bold text-slate-700 dark:text-slate-300">{fabric.name}</span>
-                                                                    </div>
-                                                                </td>
-                                                                <td className="px-6 py-4 text-center font-bold text-slate-600 dark:text-slate-400 border-r border-slate-100 dark:border-slate-700 last:border-r-0">
-                                                                    {sizeNumbers[size] || size}
-                                                                </td>
-                                                                <td className="px-4 py-3 border-r border-slate-100 dark:border-slate-700 last:border-r-0">
-                                                                    <input value={pricingData[key]?.price || ''} onChange={(e) => handlePricingChange(fabric.name, size, 'price', e.target.value)} className="w-full px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-center text-sm font-bold focus:border-rose-500 outline-none transition-all" type="number" />
-                                                                </td>
-                                                                <td className="px-4 py-3 border-r border-slate-100 dark:border-slate-700 last:border-r-0">
-                                                                    <input value={pricingData[key]?.discount_price || ''} onChange={(e) => handlePricingChange(fabric.name, size, 'discount_price', e.target.value)} className="w-full px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-center text-sm font-bold focus:border-rose-500 outline-none transition-all" type="number" />
-                                                                </td>
-                                                                <td className="px-4 py-3 text-center">
-                                                                    <input value={pricingData[key]?.stock || ''} onChange={(e) => handlePricingChange(fabric.name, size, 'stock', e.target.value)} className="w-full px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-center text-sm font-bold focus:border-rose-500 outline-none transition-all" type="number" />
-                                                                </td>
-                                                            </tr>
-                                                        )
-                                                    })
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={() => navigate('/pages/productlist')}
+                                className="px-6 py-3 text-slate-500 hover:text-slate-700 font-bold transition"
+                            >
+                                Cancel
+                            </button>
+                            {currentStep < 3 ? (
+                                <button
+                                    onClick={handleNext}
+                                    className="flex items-center gap-2 px-8 py-3 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl font-bold hover:opacity-90 transition-all shadow-lg"
+                                >
+                                    Continue
+                                    <span className="material-symbols-outlined">arrow_forward</span>
+                                </button>
                             ) : (
-                                <div className="text-center py-8 text-slate-500">Add Fabrics and Sizes to configure pricing</div>
+                                <button
+                                    onClick={handleSubmit}
+                                    className="flex items-center gap-2 px-8 py-3 bg-rose-500 text-white rounded-xl font-bold hover:bg-rose-600 transition-all shadow-lg shadow-rose-500/25"
+                                >
+                                    {id ? 'Update Product' : 'Publish Product'}
+                                    <span className="material-symbols-outlined">rocket_launch</span>
+                                </button>
                             )}
-                        </section>
-                    </div>
-
-                    {/* RIGHT COLUMN (1/3) - Configuration, Fabrics, Attributes */}
-                    <div className="space-y-6">
-
-                        {/* Configuration */}
-                        <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
-                            <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-6">Configuration</h2>
-                            <div className="space-y-6">
-                                {/* Is Customizable Toggle */}
-                                <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-100 dark:border-slate-700">
-                                    <div>
-                                        <h3 className="text-sm font-bold text-slate-900 dark:text-white">Is Customizable</h3>
-                                        <p className="text-xs text-slate-500">Enable user tweaks</p>
-                                    </div>
-                                    <div className="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in">
-                                        <input
-                                            type="checkbox"
-                                            name="toggle"
-                                            id="toggle1"
-                                            checked={isCustomizable === 1}
-                                            onChange={(e) => setIsCustomizable(e.target.checked ? 1 : 0)}
-                                            className="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer border-slate-300 checked:right-0 checked:border-rose-500 transition-all duration-300 ease-in-out"
-                                        />
-                                        <label htmlFor="toggle1" className={`toggle-label block overflow-hidden h-6 rounded-full cursor-pointer transition-colors duration-300 ${isCustomizable ? 'bg-rose-500' : 'bg-slate-300'}`}></label>
-                                    </div>
-                                </div>
-
-                                {/* Is Alter Toggle */}
-                                <div className="p-4 bg-pink-50 dark:bg-pink-900/10 rounded-lg border border-pink-100 dark:border-pink-900/30">
-                                    <div className="flex items-center justify-between mb-3">
-                                        <div>
-                                            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Alteration Available</h3>
-                                            <p className="text-xs text-slate-500">Allow size fixes</p>
-                                        </div>
-                                        <div className="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in">
-                                            <input
-                                                type="checkbox"
-                                                name="toggle"
-                                                id="toggle2"
-                                                checked={isAlter === 1}
-                                                onChange={(e) => setIsAlter(e.target.checked ? 1 : 0)}
-                                                className="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer border-slate-300 checked:right-0 checked:border-rose-500 transition-all duration-300 ease-in-out"
-                                            />
-                                            <label htmlFor="toggle2" className={`toggle-label block overflow-hidden h-6 rounded-full cursor-pointer transition-colors duration-300 ${isAlter ? 'bg-rose-500' : 'bg-slate-300'}`}></label>
-                                        </div>
-                                    </div>
-                                    {isAlter === 1 && (
-                                        <div className="relative">
-                                            <span className="absolute left-3 top-2.5 text-slate-400">₹</span>
-                                            <input
-                                                className="w-full pl-7 py-2.5 rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-rose-500 focus:border-rose-500 font-bold shadow-sm"
-                                                type="number"
-                                                value={alterCharge}
-                                                onChange={(e) => setAlterCharge(e.target.value)}
-                                            />
-                                            <p className="text-[10px] text-slate-500 mt-1 pl-1">Extra charge for alterations</p>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </section>
-
-                        {/* Fabrics */}
-                        <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
-                            <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Fabrics</h2>
-                            <div className="space-y-3 mb-4">
-                                {fabrics.map((fabric, idx) => (
-                                    <div key={idx} className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700 flex items-center justify-between">
-                                        <div className="flex items-center gap-3">
-                                            {fabric.image ? (
-                                                <div className="w-8 h-8 rounded bg-cover bg-center shadow-sm" style={{ backgroundImage: `url(${fabric.image})` }}></div>
-                                            ) : (
-                                                <div className="w-8 h-8 rounded bg-yellow-400 shadow-sm"></div>
-                                            )}
-                                            <div>
-                                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300 block">{fabric.name}</span>
-                                                {fabric.oneMeterPrice && <span className="text-xs text-slate-500">₹{fabric.oneMeterPrice}/m</span>}
-                                            </div>
-                                        </div>
-                                        <button
-                                            onClick={() => setFabrics(fabrics.filter((_, i) => i !== idx))}
-                                            className="text-slate-400 hover:text-red-500 transition"
-                                        >
-                                            <span className="material-symbols-outlined text-lg">delete</span>
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                            <button
-                                onClick={() => setIsFabricModalOpen(true)}
-                                className="w-full py-2.5 rounded-lg border border-dashed border-rose-500 text-rose-500 hover:bg-rose-500/5 font-medium text-sm flex items-center justify-center gap-2 transition"
-                            >
-                                <span className="material-symbols-outlined text-lg">add_circle</span>
-                                Add New Material
-                            </button>
-                        </section>
-
-                        {/* Product Attributes */}
-                        <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
-                            <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Product Attributes</h2>
-                            <div className="grid grid-cols-2 gap-3 mb-4">
-                                {attributes.map((attr, idx) => (
-                                    <div key={idx} className="relative group bg-slate-50 dark:bg-slate-800 rounded-lg p-2 border border-slate-100 dark:border-slate-700 text-center">
-                                        <span className="text-xs text-slate-500 uppercase font-bold">{attr.key}</span>
-                                        <div className="text-sm font-medium text-slate-800 dark:text-slate-200">{attr.value}</div>
-                                        <button
-                                            onClick={() => setAttributes(attributes.filter((_, i) => i !== idx))}
-                                            className="absolute top-1 right-1 hidden group-hover:flex text-red-500"
-                                        >
-                                            <span className="material-symbols-outlined text-[14px]">close</span>
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                            <button
-                                onClick={() => setIsAttributeModalOpen(true)}
-                                className="w-full py-2.5 rounded-lg border border-dashed border-rose-500 text-rose-500 hover:bg-rose-500/5 font-medium text-sm flex items-center justify-center gap-2 transition"
-                            >
-                                <span className="material-symbols-outlined text-lg">add_circle</span>
-                                Add Attribute
-                            </button>
-                        </section>
+                        </div>
                     </div>
                 </div>
+
             </main>
 
-            {/* ... Fabric and Attribute Modals need to use new styles ... */}
-            {isFabricModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-                    <div className="w-full max-w-md bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-xl border border-slate-200 dark:border-slate-700 m-4">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Add New Fabric</h3>
-                            <button onClick={() => setIsFabricModalOpen(false)} className="text-slate-400 hover:text-slate-500">
-                                <span className="material-symbols-outlined">close</span>
-                            </button>
-                        </div>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Fabric Name</label>
-                                <input value={newFabricName} onChange={(e) => setNewFabricName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all placeholder:text-slate-400" placeholder="e.g. Cotton" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Price per Meter (₹)</label>
-                                <input type="number" value={newFabricOneMeterPrice} onChange={(e) => setNewFabricOneMeterPrice(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/50 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all placeholder:text-slate-400" placeholder="0.00" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Image</label>
-                                <input type="file" ref={fabricInputRef} onChange={handleFabricImageChange} className="hidden" />
-                                <div onClick={() => fabricInputRef.current.click()} className="w-full h-32 border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg flex items-center justify-center cursor-pointer hover:border-rose-500 overflow-hidden">
-                                    {newFabricImagePreview ? <img src={newFabricImagePreview} className="w-full h-full object-cover" /> : <span className="text-slate-400">Upload Image</span>}
-                                </div>
-                            </div>
-                            <button onClick={handleAddFabric} className="w-full py-3 bg-rose-500 text-white rounded-lg font-bold hover:bg-rose-600">Add Fabric</button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {isAttributeModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
@@ -1147,17 +1402,7 @@ const Product = () => {
                     </div>
                 </div>
             )}
-
-            <div className="fixed bottom-6 right-6 z-40 md:hidden">
-                <button
-                    onClick={handleSubmit}
-                    className="flex items-center gap-3 px-6 py-4 bg-rose-500 text-white font-bold text-lg rounded-full shadow-xl shadow-rose-500/40 hover:bg-rose-600 hover:-translate-y-1 transition transform"
-                >
-                    <span className="material-symbols-outlined">save</span>
-                    Save Product
-                </button>
-            </div>
-        </div>
+        </div >
     );
 };
 

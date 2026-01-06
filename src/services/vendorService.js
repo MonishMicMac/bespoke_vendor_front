@@ -55,7 +55,7 @@ export const getProducts = async (page = 1, per_page = 20, search = '', category
 export const getProductDetails = async (productId) => {
     try {
         const response = await axiosInstance.get(
-            `/show/product/web/${productId}`
+            `/product/edit/${productId}`
         );
         return response.data;
     } catch (error) {
@@ -96,6 +96,17 @@ export const getOrderDetails = async (id) => {
         return response.data;
     } catch (error) {
         console.error("Error fetching order details:", error);
+        throw error;
+    }
+};
+export const makeOutOfStock = async (productPriceId) => {
+    try {
+        const response = await axiosInstance.post('/product/make-out-of-stock', {
+            product_price_id: productPriceId
+        });
+        return response.data;
+    } catch (error) {
+        console.error("Error making product out of stock:", error);
         throw error;
     }
 };

@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { useParams, Link } from 'react-router-dom';
-import { getProductDetails } from '../../services/vendorService';
+import { getProductDetails, makeOutOfStock } from '../../services/vendorService';
 import toast from 'react-hot-toast';
 
 const ProductDetails = () => {
     const { id } = useParams();
     const [product, setProduct] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [rooms, setRooms] = useState([]);
+    const [activeTab, setActiveTab] = useState(0); // 0, 1, 2... for materials, 'measurements' for measurement tab
+    const [previewImage, setPreviewImage] = useState(null);
 
     // API Base URL for relative images
     const ASSET_BASE_URL = 'http://3.7.112.78/bespoke/public';
@@ -16,6 +20,24 @@ const ProductDetails = () => {
         if (path.startsWith('http')) return path;
         const cleanPath = path.startsWith('/') ? path : `/${path}`;
         return `${ASSET_BASE_URL}${cleanPath}`;
+    };
+
+    const fetchRooms = async () => {
+        try {
+            const apiBase = import.meta.env.VITE_API;
+            const res = await axios.get(`${apiBase}/api/rooms?page=1&search=&per_page=50`);
+            let roomsList = [];
+            if (Array.isArray(res.data)) {
+                roomsList = res.data;
+            } else if (res.data?.rooms?.data) {
+                roomsList = res.data.rooms.data;
+            } else if (res.data?.data) {
+                roomsList = res.data.data;
+            }
+            setRooms(roomsList);
+        } catch (error) {
+            console.error("Error fetching rooms:", error);
+        }
     };
 
     const fetchDetails = async () => {
@@ -37,8 +59,24 @@ const ProductDetails = () => {
         }
     };
 
+    const handleMakeOutOfStock = async (priceId) => {
+        if (!window.confirm('Are you sure you want to mark this item as out of stock?')) return;
+
+        try {
+            await makeOutOfStock(priceId);
+            toast.success('Product marked as out of stock');
+            fetchDetails(); // Refresh data to show changes
+        } catch (error) {
+            console.error(error);
+            toast.error('Failed to update stock status');
+        }
+    };
+
     useEffect(() => {
-        if (id) fetchDetails();
+        if (id) {
+            fetchDetails();
+            fetchRooms();
+        }
     }, [id]);
 
     if (loading) {
@@ -58,81 +96,56 @@ const ProductDetails = () => {
         );
     }
 
-    // --- DERIVED DATA Helpers ---
-    // --- IMAGE HANDLING ---
+    // --- DERIVED DATA ---
+    const isMeasurementTab = activeTab === 'measurements';
+    const material = !isMeasurementTab ? (product.product_materials || [])[activeTab] : null;
+
+    const selectedRoom = rooms.find(r => String(r.id) === String(product.room_id));
     const mainImgUrl = getFullImageUrl(product.main_image);
 
-    // Combine all other images sources
-    const rawOtherImages = [
-        ...(product.all_images || []),
-        ...(product.images?.map(img => img.image_url) || [])
-    ];
-
-    // Deduplicate and Remove Main Image from Gallery
-    const uniqueGallery = rawOtherImages
-        .map(getFullImageUrl)
-        .filter(url => url && url !== mainImgUrl) // Remove main image
-        .filter((url, index, self) => self.indexOf(url) === index); // Remove duplicates
-
-    // Flatten Pricing Data for Table: [ { materialName, materialImg, size, actualPrice, discountPrice } ]
-    const pricingRows = [];
-    if (product.product_materials) {
-        product.product_materials.forEach(mat => {
-            if (mat.prices) {
-                mat.prices.forEach(price => {
-                    pricingRows.push({
-                        materialName: mat.materail_name,
-                        materialImg: getFullImageUrl(mat.img_path),
-                        size: price.size,
-                        actualPrice: price.actual_price,
-                        discountPrice: price.discount_price
-                    });
-                });
-            }
-        });
+    // Get unique sizes for the measurement table
+    let allSizes = [];
+    if (product.product_measurements && product.product_measurements.length > 0) {
+        const firstValue = product.product_measurements[0].value || {};
+        allSizes = Object.keys(firstValue);
     }
-
-    // Group Measurements by Size: { "XS": [ { name, value } ], ... }
-    const measurementsBySize = {};
-    if (product.product_sizes) {
-        product.product_sizes.forEach(m => {
-            if (!measurementsBySize[m.size]) measurementsBySize[m.size] = [];
-            measurementsBySize[m.size].push({
-                name: m.measurment_name || m.measurement?.name,
-                value: m.details_value
-            });
-        });
-    }
-
 
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-12 font-sans text-slate-800 dark:text-slate-200">
             {/* 1. HEADER */}
-            <header className="bg-white dark:bg-slate-800 shadow-sm sticky  z-50 border-b border-slate-200 dark:border-slate-700">
+            <header className="bg-white dark:bg-slate-800 shadow-sm sticky top-0 z-50 border-b border-slate-200 dark:border-slate-700">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-start gap-4">
+                    <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-start gap-4 flex-1">
                             <Link to="/products" className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 transition-colors mt-1">
                                 <span className="material-symbols-outlined">arrow_back</span>
                             </Link>
-                            <div>
-                                <h1 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">{product.product_name}</h1>
-                                <div className="flex flex-wrap items-center gap-2 mt-1 text-xs md:text-sm text-slate-500 dark:text-slate-400">
-                                    <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-slate-600 dark:text-slate-300 font-mono">ID: {product.id}</span>
+                            <div className="min-w-0">
+                                <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter truncate">{product.product_name}</h1>
+                                <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] md:text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                    <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-slate-600 dark:text-slate-300">ID: {product.id}</span>
                                     <span>•</span>
                                     <span>{product.vendor?.shop_name}</span>
                                     <span>•</span>
-                                    <span className="capitalize">{product.category?.name} / {product.subcategory?.name}</span>
+                                    <span>{product.category_name || product.category?.name || 'N/A'} / {product.sub_category_name || product.subcategory?.name || 'N/A'}</span>
+                                    {(product.room_name || product.roomName || selectedRoom) && (
+                                        <>
+                                            <span>•</span>
+                                            <span className="text-rose-500 font-black tracking-widest">
+                                                {product.room_name || product.roomName || selectedRoom?.name}
+                                            </span>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         </div>
                         <div className="flex items-center gap-3">
-                            <span className={`inline-flex items-center px-3 py-1 rounded-md text-xs font-medium uppercase tracking-wide border ${product.is_customizable === 1 ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 border-purple-200 dark:border-purple-700' : 'bg-slate-100 text-slate-800 border-slate-200'}`}>
-                                {product.is_customizable === 1 ? 'Customizable' : 'Standard'}
+                            <span className={`hidden sm:inline-flex items-center px-3 py-1 rounded-md text-[10px] font-black uppercase tracking-[0.2em] border ${product.is_customizable === 1 ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
+                                {product.is_customizable === 1 ? 'Customizable' : 'Ready-Made'}
                             </span>
                             <Link
                                 to={`/product/edit/${product.id}`}
-                                className="flex items-center gap-2 px-4 py-2 bg-slate-900 dark:bg-slate-700 text-white rounded-lg text-sm font-bold hover:bg-slate-800 transition shadow-sm"
+                                className="flex items-center gap-2 px-6 py-2.5 bg-slate-900 dark:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition shadow-lg shadow-slate-900/10"
                             >
                                 <span className="material-symbols-outlined text-sm">edit</span>
                                 Edit
@@ -142,224 +155,378 @@ const ProductDetails = () => {
                 </div>
             </header>
 
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-
-                {/* TOP ROW: Details (Left 2/3) & Images (Right 1/3) */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-                    {/* LEFT: Product Details Card */}
-                    <div className="lg:col-span-2 space-y-6">
-                        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700 h-full">
-                            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100 uppercase mb-6 tracking-wide">Product Details</h2>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
-                                <div>
-                                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">Gender</p>
-                                    <div className="flex items-center gap-1 font-medium text-slate-900 dark:text-white capitalize">
-                                        <span className="material-symbols-outlined text-base">wc</span>
-                                        {product.gender}
-                                    </div>
-                                </div>
-                                <div>
-                                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">Product Type</p>
-                                    <div className="font-medium text-slate-900 dark:text-white">
-                                        {product.product_type == "0" ? 'Ready Made' : 'Custom'}
-                                    </div>
-                                </div>
-                                <div>
-                                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">Alteration</p>
-                                    <div className="font-medium">
-                                        {product.is_alter == "1" ? (
-                                            <div className="flex items-center gap-1 font-medium text-green-600 dark:text-green-400">
-                                                <span className="material-symbols-outlined text-base">check</span>
-                                                Yes (₹{product.alter_charge})
-                                            </div>
-                                        ) : (
-                                            <span className="text-slate-400">No</span>
-                                        )}
-                                    </div>
-                                </div>
-                                <div>
-                                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">Rating</p>
-                                    <div className="flex items-center gap-1 font-medium text-amber-500">
-                                        <span className="material-symbols-outlined text-base">star_border</span>
-                                        {product.rating || 'N/A'}
-                                    </div>
-                                </div>
-                            </div>
-                            <div>
-                                <p className="text-sm text-slate-500 dark:text-slate-400 mb-2">Description</p>
-                                <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-md text-slate-700 dark:text-slate-300 leading-relaxed text-sm border border-slate-100 dark:border-slate-700/50">
-                                    {product.description || "No description available."}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* RIGHT: Images Section */}
-                    <div className="space-y-6">
-                        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
-                            <h2 className="text-sm font-bold text-slate-500 dark:text-slate-400 uppercase mb-3">Main Image</h2>
-                            <div className="aspect-[3/4] w-full rounded-md overflow-hidden bg-slate-100 dark:bg-slate-800 relative group">
-                                <img
-                                    src={mainImgUrl}
-                                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                                    alt="Main Product"
-                                />
-                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition duration-300 pointer-events-none"></div>
-                            </div>
-                        </div>
-
-                        {uniqueGallery.length > 0 && (
-                            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
-                                <h2 className="text-sm font-bold text-slate-500 dark:text-slate-400 uppercase mb-3">Gallery ({uniqueGallery.length})</h2>
-                                <div className="grid grid-cols-3 gap-2">
-                                    {uniqueGallery.map((img, i) => (
-                                        <div key={i} className="aspect-square rounded-md overflow-hidden bg-slate-100 dark:bg-slate-800 border border-transparent hover:border-purple-600 cursor-pointer transition-colors group relative">
-                                            <img src={img} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" alt={`Gallery ${i}`} />
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+                {/* 2. TABS SELECTOR */}
+                <div className="flex flex-wrap gap-2 p-1.5 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
+                    {(product.product_materials || []).map((mat, idx) => (
+                        <button
+                            key={idx}
+                            onClick={() => setActiveTab(idx)}
+                            className={`flex-1 min-w-[120px] px-4 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === idx
+                                ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/20'
+                                : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700'
+                                }`}
+                        >
+                            <span className="material-symbols-outlined text-sm">texture</span>
+                            {mat.material_identity || mat.material_name || mat.name || `Material ${idx + 1}`}
+                        </button>
+                    ))}
+                    <button
+                        onClick={() => setActiveTab('measurements')}
+                        className={`flex-1 min-w-[120px] px-4 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'measurements'
+                            ? 'bg-sky-600 text-white shadow-lg shadow-sky-600/20'
+                            : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700'
+                            }`}
+                    >
+                        <span className="material-symbols-outlined text-sm">straighten</span>
+                        Measurements
+                    </button>
                 </div>
 
-                {/* MIDDLE ROW: PRICING & VARIANTS (Full Width) */}
-                <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
-                        <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Pricing & Variants</h2>
-                        <span className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded">{product.product_sizes?.length || 0} Sizes Available</span>
-                    </div>
-
-                    <div className="p-6">
-                        {/* Group by Material */}
-                        {product.product_materials?.map((mat, mIdx) => (
-                            <div key={mIdx} className="mb-0">
-                                <div className="flex items-center gap-4 mb-6">
-                                    <div className="w-12 h-12 rounded-lg overflow-hidden bg-slate-200 dark:bg-slate-600 shadow-sm border border-slate-100 dark:border-slate-600">
-                                        <img src={getFullImageUrl(mat.img_path)} className="w-full h-full object-cover" alt={mat.materail_name} />
+                {/* 3. CONTENT AREA */}
+                {!isMeasurementTab ? (
+                    /* MATERIAL VIEW */
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        {/* LEFT: Material Info & Pricing */}
+                        <div className="lg:col-span-2 space-y-8">
+                            <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm p-8 border border-slate-200 dark:border-slate-700">
+                                <div className="flex items-center gap-4 mb-8">
+                                    <div className="w-16 h-16 rounded-2xl bg-rose-50 flex items-center justify-center text-rose-500">
+                                        <span className="material-symbols-outlined text-3xl">info</span>
                                     </div>
                                     <div>
-                                        <h3 className="text-base font-bold text-slate-900 dark:text-white">{mat.materail_name}</h3>
-                                        <p className="text-sm text-slate-500 dark:text-slate-400">Primary Material</p>
+                                        <h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter">Fabric Information</h2>
+                                        <p className="text-sm font-medium text-slate-500">{material.material_identity || material.material_name || material.name}</p>
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                                    {mat.prices?.map((price, pIdx) => {
-                                        const discountNum = parseFloat(price.actual_price) - parseFloat(price.discount_price);
-                                        const discountPerc = Math.round((discountNum / price.actual_price) * 100);
-
-                                        return (
-                                            <div key={pIdx} className="group relative flex flex-col justify-between p-4 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-white dark:hover:bg-slate-800 hover:shadow-md hover:border-purple-500/50 cursor-pointer transition-all duration-200">
-                                                <div className="flex justify-between items-start mb-3">
-                                                    <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white font-bold shadow-sm border border-slate-100 dark:border-slate-600 group-hover:text-purple-600 transition-colors text-sm">
-                                                        {price.size}
-                                                    </span>
-                                                    {discountPerc > 0 && (
-                                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400">
-                                                            {discountPerc}% OFF
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                <div className="space-y-0.5">
-                                                    <p className="text-xs font-medium text-slate-400 line-through">₹{parseFloat(price.actual_price).toFixed(2)}</p>
-                                                    <p className="text-lg font-bold text-slate-900 dark:text-white">₹{parseFloat(price.discount_price).toFixed(2)}</p>
-                                                </div>
-                                                <div className="absolute inset-0 border-2 border-purple-500 rounded-xl opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all pointer-events-none"></div>
-                                            </div>
-                                        );
-                                    })}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                                    <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-700">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Room</label>
+                                        <span className="text-sm font-black text-rose-500 uppercase">{product.room_name || product.roomName || selectedRoom?.name || 'N/A'}</span>
+                                    </div>
+                                    <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-700">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Category</label>
+                                        <span className="text-sm font-black text-slate-900 dark:text-white uppercase">{product.category_name || product.category?.name || 'N/A'}</span>
+                                    </div>
+                                    <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-700">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Subcategory</label>
+                                        <span className="text-sm font-black text-slate-900 dark:text-white uppercase">{product.sub_category_name || product.subcategory?.name || 'N/A'}</span>
+                                    </div>
+                                    <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-700">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Gender</label>
+                                        <span className="text-sm font-black text-slate-900 dark:text-white uppercase">{product.gender}</span>
+                                    </div>
+                                    <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-700">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Alteration</label>
+                                        <span className={`text-sm font-black uppercase ${product.is_alter == "1" ? 'text-green-600' : 'text-slate-400'}`}>
+                                            {product.is_alter == "1" ? `Yes (₹${product.alter_charge})` : 'No'}
+                                        </span>
+                                    </div>
+                                    <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-700">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Status</label>
+                                        <span className={`text-sm font-black uppercase ${product.action == "0" ? 'text-amber-500' : 'text-green-500'}`}>
+                                            {product.action == "0" ? 'INACTIVE' : 'ACTIVE'}
+                                        </span>
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
 
-                {/* BOTTOM ROW: MEASUREMENTS & GUIDES */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-                    {/* MEASUREMENTS TABLE */}
-                    <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden h-fit">
-                        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-                            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Measurements</h2>
-                        </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left text-sm">
-                                <thead className="bg-slate-50 dark:bg-slate-800/50 text-xs uppercase text-slate-500 dark:text-slate-400 font-semibold">
-                                    <tr>
-                                        <th className="px-6 py-3 w-20">Size</th>
-                                        <th className="px-6 py-3">Point</th>
-                                        <th className="px-6 py-3 text-right">Value (IN)</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                                    {Object.entries(measurementsBySize).map(([size, measures]) => (
-                                        measures.map((m, mIdx) => (
-                                            <tr key={`${size}-${mIdx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
-                                                {mIdx === 0 && (
-                                                    <td rowSpan={measures.length} className="px-6 py-4 align-top font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-800/50 border-r border-slate-100 dark:border-slate-700">
-                                                        {size}
-                                                    </td>
-                                                )}
-                                                <td className="px-6 py-4 text-slate-700 dark:text-slate-300">{m.name}</td>
-                                                <td className="px-6 py-4 text-right font-medium text-slate-900 dark:text-white">{m.value}</td>
-                                            </tr>
-                                        ))
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    {/* MEASUREMENT GUIDES */}
-                    <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden h-fit">
-                        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-                            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Measurement Guides</h2>
-                        </div>
-                        <div className="p-6">
-                            <div className="grid grid-cols-2 lg:grid-cols-2 gap-4">
-                                {product.measurement_references?.map((ref, i) => (
-                                    <div key={i} className="group relative rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 aspect-[3/4]">
-                                        <img src={getFullImageUrl(ref.image_url)} className="w-full h-full object-cover" alt={ref.measurment_name} />
-                                        <div className="absolute bottom-0 left-0 right-0 bg-slate-900/80 backdrop-blur-sm py-2 text-center">
-                                            <span className="text-xs font-bold text-white uppercase tracking-wider">{ref.measurment_name}</span>
+                                {/* Product Attributes */}
+                                {product.product_details && product.product_details.length > 0 && (
+                                    <div className="mb-8">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-4 underline decoration-sky-500 underline-offset-4">Product Attributes</label>
+                                        <div className="flex flex-wrap gap-4">
+                                            {product.product_details.map((attr, idx) => (
+                                                <div key={idx} className="px-4 py-2 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-700 flex flex-col min-w-[120px]">
+                                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-tight mb-0.5">{attr.detail}</span>
+                                                    <span className="text-xs font-black text-slate-900 dark:text-white uppercase">{attr.value}</span>
+                                                </div>
+                                            ))}
                                         </div>
                                     </div>
-                                ))}
+                                )}
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block pl-1">Description</label>
+                                    <div className="p-6 bg-slate-50 dark:bg-slate-900/50 rounded-2xl text-slate-700 dark:text-slate-300 leading-relaxed text-sm border border-slate-100 dark:border-slate-700 min-h-[100px]">
+                                        {material.description || product.description || "No specific description."}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Product Addons */}
+                            {((material.addons && material.addons.length > 0) || (material.product_addons && material.product_addons.length > 0)) && (
+                                <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm p-8 border border-slate-200 dark:border-slate-700">
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <div className="p-2 bg-rose-500/10 rounded-lg text-rose-500">
+                                            <span className="material-symbols-outlined">add_circle</span>
+                                        </div>
+                                        <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Available Addons</h3>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        {(material.addons || material.product_addons).map((addon, aIdx) => (
+                                            <div key={aIdx}
+                                                onClick={() => setPreviewImage(getFullImageUrl(addon.images?.[0]?.img_path || addon.img_path || addon.image))}
+                                                className="flex items-center gap-4 p-4 rounded-2xl border border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 hover:border-rose-200 transition-all group cursor-pointer"
+                                            >
+                                                <div className="w-16 h-16 rounded-xl overflow-hidden bg-white border border-slate-200 shadow-sm flex-shrink-0">
+                                                    <img
+                                                        src={getFullImageUrl(addon.images?.[0]?.img_path || addon.img_path || addon.image)}
+                                                        alt={addon.name}
+                                                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                                                        onError={(e) => { e.target.src = 'https://placehold.co/100x100?text=Addon'; }}
+                                                    />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase truncate">{addon.name}</h4>
+                                                    <div className="flex items-center gap-2 mt-1">
+                                                        <span className="text-xs font-bold text-rose-500">₹{parseFloat(addon.amount || addon.price || 0).toFixed(0)}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="space-y-8">
+                                {/* Ready-made Table */}
+                                {material.prices?.some(pr => String(pr.price_type).toLowerCase() === 'ready' || pr.price_type_id == 1) && (
+                                    <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm overflow-hidden border border-slate-200 dark:border-slate-700">
+                                        <div className="px-8 py-6 border-b border-slate-100 dark:border-slate-700 flex items-center gap-3">
+                                            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                                            <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Ready-made Pricing</h3>
+                                        </div>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-left text-sm uppercase font-bold">
+                                                <thead className="bg-slate-50 dark:bg-slate-900/50 text-[10px] text-slate-500 tracking-widest">
+                                                    <tr>
+                                                        <th className="px-8 py-4">Size</th>
+                                                        <th className="px-8 py-4 text-center">Regular Price</th>
+                                                        <th className="px-8 py-4 text-center">Offer Price</th>
+                                                        <th className="px-8 py-4 text-center">Stock</th>
+                                                        <th className="px-8 py-4 text-center">Action</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                                                    {material.prices.filter(pr => String(pr.price_type).toLowerCase() === 'ready' || pr.price_type_id == 1).map((pr, pIdx) => (
+                                                        <tr key={pIdx} className="hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors">
+                                                            <td className="px-8 py-4">
+                                                                <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white font-black text-[11px] shadow-sm">
+                                                                    {pr.size}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-8 py-4 text-center text-slate-400 line-through">₹{parseFloat(pr.actual_price).toFixed(0)}</td>
+                                                            <td className="px-8 py-4 text-center text-slate-900 dark:text-white font-black">₹{parseFloat(pr.discount_price).toFixed(0)}</td>
+                                                            <td className="px-8 py-4 text-center">
+                                                                <span className={`px-2 py-1 rounded text-[10px] ${pr.qty > 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                                                                    {pr.qty > 0 ? `${pr.qty} IN STOCK` : 'OUT OF STOCK'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-8 py-4 text-center">
+                                                                <button
+                                                                    onClick={() => handleMakeOutOfStock(pr.id)}
+                                                                    className={`p-2 rounded-lg transition-all text-rose-500 hover:bg-rose-50`}
+                                                                    title="Make Out of Stock"
+                                                                >
+                                                                    <span className="material-symbols-outlined text-lg">block</span>
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Custom Table */}
+                                {material.prices?.some(pr => String(pr.price_type).toLowerCase() === 'custom' || pr.price_type_id == 0) && (
+                                    <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm overflow-hidden border border-slate-200 dark:border-slate-700">
+                                        <div className="px-8 py-6 border-b border-slate-100 dark:border-slate-700 flex items-center gap-3">
+                                            <div className="w-2 h-2 rounded-full bg-rose-500"></div>
+                                            <h3 className="text-lg font-black text-rose-500 uppercase tracking-tight">Custom Pricing</h3>
+                                        </div>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-left text-sm uppercase font-bold">
+                                                <thead className="bg-slate-50 dark:bg-slate-900/50 text-[10px] text-slate-500 tracking-widest">
+                                                    <tr>
+                                                        <th className="px-8 py-4">Size</th>
+                                                        <th className="px-8 py-4 text-center">Regular Price</th>
+                                                        <th className="px-8 py-4 text-center text-rose-500">Custom Offer Price</th>
+                                                        <th className="px-8 py-4 text-center">Status</th>
+                                                        <th className="px-8 py-4 text-center">Action</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                                                    {material.prices.filter(pr => String(pr.price_type).toLowerCase() === 'custom' || pr.price_type_id == 0).map((pr, pIdx) => (
+                                                        <tr key={pIdx} className="hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors">
+                                                            <td className="px-8 py-4">
+                                                                <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 font-black text-[11px] shadow-sm">
+                                                                    {pr.size}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-8 py-4 text-center text-slate-400 line-through">₹{parseFloat(pr.actual_price).toFixed(0)}</td>
+                                                            <td className="px-8 py-4 text-center text-rose-600 font-black">₹{parseFloat(pr.discount_price).toFixed(0)}</td>
+                                                            <td className="px-8 py-4 text-center">
+                                                                <span className={`px-2 py-1 rounded text-[10px] ${pr.stock_status !== 'out_of_stock' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                                                                    {pr.stock_status !== 'out_of_stock' ? 'AVAILABLE' : 'OUT OF STOCK'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-8 py-4 text-center">
+                                                                <button
+                                                                    onClick={() => handleMakeOutOfStock(pr.id)}
+                                                                    className={`p-2 rounded-lg transition-all text-rose-500 hover:bg-rose-50`}
+                                                                    title="Make Out of Stock"
+                                                                >
+                                                                    <span className="material-symbols-outlined text-lg">block</span>
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* RIGHT: Material Photos */}
+                        <div className="space-y-8">
+                            <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm p-6 border border-slate-200 dark:border-slate-700 sticky top-28">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-4 underline decoration-rose-500 underline-offset-4">Material Gallery</label>
+
+                                {/* Featured Image */}
+                                <div
+                                    onClick={() => setPreviewImage(getFullImageUrl(material.images?.[0]?.img_path) || mainImgUrl)}
+                                    className="aspect-[3/4] rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-900 mb-4 border border-slate-100 dark:border-slate-700 shadow-inner cursor-zoom-in group"
+                                >
+                                    <img
+                                        src={getFullImageUrl(material.images?.[0]?.img_path) || mainImgUrl}
+                                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                                        alt="Featured"
+                                    />
+                                </div>
+
+                                {/* Others Grid */}
+                                <div className="grid grid-cols-3 gap-3">
+                                    {material.images?.slice(1).map((img, i) => (
+                                        <div
+                                            key={i}
+                                            onClick={() => setPreviewImage(getFullImageUrl(img.img_path))}
+                                            className="aspect-square rounded-xl overflow-hidden bg-slate-100 border border-slate-200 hover:border-rose-500 transition-colors cursor-zoom-in group"
+                                        >
+                                            <img src={getFullImageUrl(img.img_path)} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" alt="Gallery" />
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
+                ) : (
+                    /* MEASUREMENTS VIEW */
+                    <div className="space-y-8">
+                        <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm p-8 border border-slate-200 dark:border-slate-700">
+                            <div className="flex items-center gap-4 mb-10">
+                                <div className="w-16 h-16 rounded-2xl bg-sky-50 flex items-center justify-center text-sky-600 font-bold">
+                                    <span className="material-symbols-outlined text-3xl">straighten</span>
+                                </div>
+                                <div>
+                                    <h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter">Size & Measurement Matrix</h2>
+                                    <p className="text-sm font-medium text-slate-500 underline decoration-sky-600 underline-offset-4 decoration-2">Complete size chart for all measurement points</p>
+                                </div>
+                            </div>
+
+                            <div className="overflow-x-auto rounded-2xl border border-slate-900 dark:border-slate-700 shadow-xl">
+                                <table className="w-full text-left text-xs font-black uppercase tracking-tight border-collapse">
+                                    <thead>
+                                        <tr className="bg-slate-900 text-white">
+                                            <th className="px-6 py-4 border-r border-slate-700">Measurement Point</th>
+                                            {allSizes.map(size => (
+                                                <th key={size} className="px-6 py-4 text-center border-r border-slate-700 last:border-0">{size}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-200 dark:divide-slate-700 font-bold">
+                                        {product.product_measurements?.map((m, mIdx) => (
+                                            <tr key={mIdx} className="hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors">
+                                                <td className="px-6 py-4 border-r border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 sticky left-0 z-10 w-fit whitespace-nowrap">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-1.5 h-1.5 bg-sky-500 rounded-full"></div>
+                                                        {m.measurement?.name || m.name}
+                                                    </div>
+                                                </td>
+                                                {allSizes.map(size => (
+                                                    <td key={size} className="px-6 py-4 text-center border-r border-slate-100 dark:border-slate-700/50 last:border-0 font-black text-slate-900 dark:text-white bg-white dark:bg-slate-800">
+                                                        {m.value?.[size]?.[`meas_${m.measurement_id}`] || '---'}
+                                                        <span className="text-[8px] text-slate-400 ml-0.5">IN</span>
+                                                    </td>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {/* Selected Points Cards (Small Gallery) */}
+                        <div className="bg-white dark:bg-slate-800 rounded-3xl p-8 border border-slate-200 dark:border-slate-700 shadow-sm">
+                            <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Selected Points Guides</h3>
+                            <div className="flex flex-wrap gap-6">
+                                {product.product_measurements?.map((m, i) => {
+                                    const listInfo = product.measurements_list?.find(ml => ml.measurement_id === m.measurement_id);
+                                    const imgUrl = listInfo?.measurement_image || m.measurement?.img_path;
+
+                                    return (
+                                        <div key={i} className="flex flex-col items-center gap-3">
+                                            <div className="w-28 h-28 rounded-2xl overflow-hidden bg-white border border-slate-100 dark:border-slate-700 shadow-sm transition-transform hover:scale-105">
+                                                {imgUrl ? (
+                                                    <img
+                                                        src={getFullImageUrl(imgUrl)}
+                                                        className="w-full h-full object-cover cursor-zoom-in group-hover:scale-110 transition-transform duration-500"
+                                                        alt="Guide"
+                                                        onClick={() => setPreviewImage(getFullImageUrl(imgUrl))}
+                                                    />
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center text-slate-200 bg-slate-50">
+                                                        <span className="material-symbols-outlined text-4xl">image</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <span className="text-[9px] font-black uppercase text-slate-600 text-center max-w-[110px]">{m.measurement?.name || m.name}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                )}
             </main>
 
-            {/* 4. REVIEWS TABLE */}
-            {/* Only show if reviews exist to keep it clean */}
-            {product.reviews && product.reviews.length > 0 && (
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-                        <h2 className="text-lg font-bold text-slate-900 dark:text-white">Customer Reviews</h2>
+            {/* IMAGE PREVIEW MODAL */}
+            {previewImage && (
+                <div
+                    className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/90 backdrop-blur-sm p-4 animate-in fade-in duration-300"
+                    onClick={() => setPreviewImage(null)}
+                >
+                    <button
+                        onClick={() => setPreviewImage(null)}
+                        className="absolute top-6 right-6 w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-full transition-all border border-white/10 shadow-xl"
+                    >
+                        <span className="material-symbols-outlined">close</span>
+                    </button>
+
+                    <div
+                        className="relative max-w-5xl w-full h-[90vh] flex items-center justify-center animate-in zoom-in-95 duration-300"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <img
+                            src={previewImage}
+                            alt="Preview"
+                            className="max-w-full max-h-full object-contain rounded-2xl shadow-2xl border border-white/10"
+                        />
                     </div>
-                    <table className="w-full text-sm text-left">
-                        <thead className="bg-slate-50 dark:bg-slate-700/50 text-xs uppercase text-slate-500 font-bold">
-                            <tr>
-                                <th className="px-6 py-3">User</th>
-                                <th className="px-6 py-3">Rating</th>
-                                <th className="px-6 py-3">Comment</th>
-                                <th className="px-6 py-3 text-right">Date</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                            {product.reviews.map((rev, idx) => (
-                                <tr key={idx}>
-                                    <td className="px-6 py-3 font-medium">{rev.username}</td>
-                                    <td className="px-6 py-3 text-amber-500 font-bold">{rev.rating} ★</td>
-                                    <td className="px-6 py-3 text-slate-600 truncate max-w-xs" title={rev.comments}>{rev.comments}</td>
-                                    <td className="px-6 py-3 text-right text-slate-400 text-xs">{rev.review_date}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
                 </div>
             )}
         </div>

@@ -1,11 +1,12 @@
 import axios from 'axios';
 import Cookies from 'js-cookie';
 
-const API_URL = import.meta.env.VITE_API + "/api/vendor";
+// import.meta.env.VITE_API will be "http://3.7.112.78/bespoke/public" after build
+const BASE_URL = import.meta.env.VITE_API;
 
 const axiosInstance = axios.create({
-    // ✅ MUST be relative path to trigger the Vite Tunnel
-    baseURL: '/api/vendor',
+    // This combines your domain with the specific API path
+    baseURL: `${BASE_URL}/api/vendor`,
     withCredentials: true,
     headers: {
         'Content-Type': 'application/json',
@@ -13,28 +14,25 @@ const axiosInstance = axios.create({
     },
 });
 
-// 1. REQUEST INTERCEPTOR
-// We NO LONGER need to manually attach the token. The browser does it.
+// INTERCEPTORS
 axiosInstance.interceptors.request.use(
     (config) => {
-        // Debugging: Log the request to ensure credentials are sent
-        console.log('🚀 Axios Request:', config.method.toUpperCase(), config.url);
-        console.log('🔑 withCredentials:', config.withCredentials);
+        const token = Cookies.get('access_token');
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
+        console.log('🚀 API Call to:', config.baseURL + config.url);
         return config;
     },
-    (error) => {
-        return Promise.reject(error);
-    }
+    (error) => Promise.reject(error)
 );
 
-// 2. RESPONSE INTERCEPTOR
 axiosInstance.interceptors.response.use(
     (response) => response,
     (error) => {
         if (error.response && [401, 403].includes(error.response.status)) {
-            // If the cookie expires or is invalid
-            Cookies.remove('vendor_id'); // Clear your local ID
-            window.location.href = '/login';
+            // Cookies.remove('vendor_id');
+            // window.location.href = '/vendor/login';
         }
         return Promise.reject(error);
     }

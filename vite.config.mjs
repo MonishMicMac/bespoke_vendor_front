@@ -8,10 +8,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     // 1. Set the base path for AWS subfolder hosting
-    base: '/vendor/', 
-    
+    base: '/vendor/',
+
     plugins: [react()],
-    
+
     // 2. Optimization for the 'Memory Allocation' issue
     build: {
       chunkSizeWarningLimit: 2000,
@@ -34,6 +34,7 @@ export default defineConfig(({ mode }) => {
           target: 'http://3.7.112.78/bespoke/public',
           changeOrigin: true,
           secure: false,
+          credentials: true,
         }
       }
     }
