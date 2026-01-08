@@ -110,3 +110,40 @@ export const makeOutOfStock = async (productPriceId) => {
         throw error;
     }
 };
+export const removeOutOfStock = async (productPriceId, qty = null) => {
+    try {
+        const payload = { price_id: productPriceId };
+        if (qty !== null) payload.qty = qty;
+
+        const response = await axiosInstance.post('/removeOutOfStock', payload);
+        return response.data;
+    } catch (error) {
+        console.error("Error removing out of stock:", error);
+        throw error;
+    }
+};
+export const toggleProductStatus = async (productId, status) => {
+    try {
+        const response = await axiosInstance.post('/products/toggle-status', {
+            product_id: productId,
+            status: status
+        });
+        return response.data;
+    } catch (error) {
+        console.error("Error toggling product status:", error);
+        throw error;
+    }
+};
+
+export const toggleMaterialStatus = async (materialId, status) => {
+    try {
+        const response = await axiosInstance.post('/materials/toggle-status', {
+            material_id: materialId,
+            status: status
+        });
+        return response.data;
+    } catch (error) {
+        console.error("Error toggling material status:", error);
+        throw error;
+    }
+};

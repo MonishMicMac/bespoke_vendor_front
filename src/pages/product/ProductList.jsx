@@ -166,14 +166,14 @@ const ProductList = () => {
                                     <div
                                         key={product.id}
                                         onClick={() => navigate(`/product/${product.id}`)}
-                                        className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden hover:shadow-lg transition cursor-pointer group"
+                                        className="group w-full bg-white dark:bg-slate-800 rounded-[2rem] p-3 shadow-sm hover:shadow-2xl border border-slate-100 dark:border-slate-700 transition-all duration-500 ease-out relative cursor-pointer"
                                     >
-                                        <div className="aspect-[4/5] bg-slate-100 dark:bg-slate-700 relative overflow-hidden">
+                                        <div className="relative aspect-[4/5] overflow-hidden rounded-[1.5rem] bg-slate-100 dark:bg-slate-800 shadow-inner">
                                             {product.image ? (
                                                 <img
                                                     src={product.image}
                                                     alt={product.product_name}
-                                                    className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+                                                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 will-change-transform"
                                                 />
                                             ) : (
                                                 <div className="w-full h-full flex items-center justify-center text-slate-400">
@@ -181,48 +181,80 @@ const ProductList = () => {
                                                 </div>
                                             )}
 
-                                            {/* Badges */}
-                                            <div className="absolute top-2 left-2 flex flex-col gap-1">
+                                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-80"></div>
+
+                                            {/* Discount Badge */}
+                                            {product.discount_percent > 0 && (
+                                                <div className="absolute top-4 left-4 z-10">
+                                                    <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/95 text-rose-500 text-xs font-bold shadow-lg backdrop-blur-md transform transition-transform group-hover:-translate-y-1">
+                                                        <span className="material-symbols-outlined text-[16px] leading-none">local_offer</span>
+                                                        {product.discount_percent}% OFF
+                                                    </span>
+                                                </div>
+                                            )}
+
+                                            {/* Edit Button */}
+                                            <div className="absolute top-4 right-4 z-10">
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        navigate(`/product/edit/${product.id}`);
+                                                    }}
+                                                    className="flex items-center justify-center w-9 h-9 rounded-full bg-white/20 hover:bg-white text-white hover:text-slate-900 backdrop-blur-md border border-white/30 transition-all duration-300 hover:shadow-[0_0_15px_rgba(255,255,255,0.5)]"
+                                                >
+                                                    <span className="material-symbols-outlined text-[20px]">edit</span>
+                                                </button>
+                                            </div>
+
+                                            {/* Customizable Badge */}
+                                            <div className="absolute bottom-4 left-4 right-4 z-10 flex justify-between items-end">
                                                 {product.is_customizable === 1 && (
-                                                    <span className="px-2 py-1 bg-violet-600/90 text-white text-[10px] uppercase font-bold rounded backdrop-blur-sm">
+                                                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/40 border border-white/20 backdrop-blur-md text-white text-[11px] font-semibold tracking-wide uppercase">
+                                                        <span className="material-symbols-outlined text-[14px] leading-none text-rose-400">palette</span>
                                                         Customizable
                                                     </span>
                                                 )}
-                                                {product.discount_percent > 0 && (
-                                                    <span className="px-2 py-1 bg-red-500/90 text-white text-[10px] uppercase font-bold rounded backdrop-blur-sm">
-                                                        {product.discount_percent}% OFF
-                                                    </span>
-                                                )}
                                             </div>
-
-                                            {/* Edit Button */}
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    navigate(`/product/edit/${product.id}`);
-                                                }}
-                                                className="absolute top-2 right-2 p-2 bg-white/90 hover:bg-white text-slate-700 hover:text-rose-500 rounded-full shadow-sm backdrop-blur-sm transition z-10"
-                                                title="Edit Product"
-                                            >
-                                                <span className="material-symbols-outlined text-lg">edit</span>
-                                            </button>
                                         </div>
 
-                                        <div className="p-4">
-                                            <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">{product.vendor_name}</div>
-                                            <h3 className="font-bold text-slate-900 dark:text-white mb-2 line-clamp-1 truncate" title={product.product_name}>
-                                                {product.product_name}
-                                            </h3>
+                                        <div className="pt-5 px-2 pb-2">
+                                            <div className="flex justify-between items-start mb-4">
+                                                <div className="flex-1 pr-2">
+                                                    <div className="flex items-center gap-1 mb-1.5">
+                                                        <span className="material-symbols-outlined text-[14px] text-slate-400">storefront</span>
+                                                        <p className="text-xs font-medium text-slate-500 dark:text-slate-400 truncate max-w-[120px]">{product.vendor_name}</p>
+                                                    </div>
+                                                    <h3 className="text-lg font-bold text-slate-900 dark:text-white leading-tight group-hover:text-rose-500 transition-colors line-clamp-1">
+                                                        {product.product_name}
+                                                    </h3>
+                                                </div>
 
-                                            <div className="flex items-baseline gap-2">
-                                                <span className="text-lg font-bold text-rose-500">
-                                                    ₹{formatPrice(product.discount_price)}
-                                                </span>
-                                                {parseFloat(product.discount_price) < parseFloat(product.actual_price) && (
-                                                    <span className="text-sm text-slate-400 line-through decoration-slate-400">
-                                                        ₹{formatPrice(product.actual_price)}
+                                                {/* Status Badge */}
+                                                <div className="flex flex-col items-end">
+                                                    <span className={`flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full text-[11px] font-bold border shadow-sm ${product.is_active == "1" ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+                                                        <span className="relative flex h-2 w-2">
+                                                            {product.is_active == "1" && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75"></span>}
+                                                            <span className={`relative inline-flex rounded-full h-2 w-2 ${product.is_active == "1" ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+                                                        </span>
+                                                        {product.is_active == "1" ? 'Active' : 'Inactive'}
                                                     </span>
-                                                )}
+                                                </div>
+                                            </div>
+
+                                            {/* Pricing Section */}
+                                            <div className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl p-4 border border-slate-100 dark:border-slate-800 flex items-center justify-between group-hover:border-rose-500/20 transition-colors duration-300">
+                                                <div className="flex flex-col">
+                                                    <span className="text-[10px] uppercase text-slate-400 font-bold tracking-wider mb-1">Listing Price</span>
+                                                    <div className="flex items-baseline gap-2">
+                                                        <span className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">₹{formatPrice(product.discount_price)}</span>
+                                                        {parseFloat(product.discount_price) < parseFloat(product.actual_price) && (
+                                                            <span className="text-sm text-slate-400 line-through decoration-slate-400/50">₹{formatPrice(product.actual_price)}</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div className="h-8 w-8 rounded-full bg-white dark:bg-slate-800 flex items-center justify-center text-slate-400 shadow-sm border border-slate-100 dark:border-slate-700 group-hover:text-rose-500 transition-colors">
+                                                    <span className="material-symbols-outlined text-[18px]">visibility</span>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>

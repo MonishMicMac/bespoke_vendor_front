@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useParams, Link } from 'react-router-dom';
-import { getProductDetails, makeOutOfStock } from '../../services/vendorService';
+import { getProductDetails, makeOutOfStock, removeOutOfStock, toggleProductStatus, toggleMaterialStatus } from '../../services/vendorService';
 import toast from 'react-hot-toast';
 
 const ProductDetails = () => {
@@ -11,6 +11,7 @@ const ProductDetails = () => {
     const [rooms, setRooms] = useState([]);
     const [activeTab, setActiveTab] = useState(0); // 0, 1, 2... for materials, 'measurements' for measurement tab
     const [previewImage, setPreviewImage] = useState(null);
+    const [confirmModal, setConfirmModal] = useState({ isOpen: false, isClosing: false, priceId: null, type: 'make', qty: '', priceTypeId: null });
 
     // API Base URL for relative images
     const ASSET_BASE_URL = 'http://3.7.112.78/bespoke/public';
@@ -59,18 +60,112 @@ const ProductDetails = () => {
         }
     };
 
-    const handleMakeOutOfStock = async (priceId) => {
-        if (!window.confirm('Are you sure you want to mark this item as out of stock?')) return;
+    const closeModal = () => {
+        setConfirmModal(prev => ({ ...prev, isClosing: true }));
+        setTimeout(() => {
+            setConfirmModal({ isOpen: false, isClosing: false, priceId: null, type: 'make', qty: '', priceTypeId: null });
+        }, 300);
+    };
+
+    const handleToggleStock = (pr) => {
+        setConfirmModal({
+            isOpen: true,
+            isClosing: false,
+            priceId: pr.id,
+            type: pr.out_of_stock == "1" ? 'remove' : 'make',
+            qty: pr.qty || '',
+            priceTypeId: pr.price_type_id
+        });
+    };
+
+    const executeStockAction = async () => {
+        const { priceId, type, qty } = confirmModal;
+        if (!priceId) return;
 
         try {
-            await makeOutOfStock(priceId);
-            toast.success('Product marked as out of stock');
-            fetchDetails(); // Refresh data to show changes
+            if (type === 'make') {
+                await makeOutOfStock(priceId);
+                toast.success('Product marked as out of stock');
+            } else {
+                await removeOutOfStock(priceId, qty || null);
+                toast.success('Stock status restored');
+            }
+
+            // Local state update to avoid refresh
+            setProduct(prev => {
+                if (!prev) return prev;
+                const newMaterials = (prev.product_materials || []).map(mat => ({
+                    ...mat,
+                    prices: (mat.prices || []).map(pr => {
+                        if (pr.id === priceId) {
+                            return {
+                                ...pr,
+                                out_of_stock: type === 'make' ? '1' : '0',
+                                qty: type === 'remove' && qty ? parseInt(qty) : (type === 'make' ? 0 : pr.qty)
+                            };
+                        }
+                        return pr;
+                    })
+                }));
+                return { ...prev, product_materials: newMaterials };
+            });
+
+            closeModal();
         } catch (error) {
             console.error(error);
-            toast.error('Failed to update stock status');
+            toast.error(`Failed to update stock status`);
         }
     };
+
+    const handleToggleProductStatus = async () => {
+        const newStatus = product.product_is_active == "1" ? "0" : "1";
+        try {
+            await toggleProductStatus(product.id, newStatus);
+            setProduct(prev => ({ ...prev, product_is_active: newStatus }));
+            toast.success(newStatus === "1" ? 'Product Activated' : 'Product Inactivated', {
+                icon: newStatus === "1" ? '✅' : '🚫',
+                style: { borderRadius: '15px', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.05em' }
+            });
+        } catch (error) {
+            console.error(error);
+            toast.error('Failed to toggle product status');
+        }
+    };
+
+    const handleToggleMaterialStatus = async (matId, currentStatus) => {
+        const newStatus = currentStatus == "1" ? "0" : "1";
+        try {
+            await toggleMaterialStatus(matId, newStatus);
+            setProduct(prev => ({
+                ...prev,
+                product_materials: prev.product_materials.map(mat =>
+                    mat.id === matId
+                        ? { ...mat, material_is_active: newStatus }
+                        : mat
+                )
+            }));
+            toast.success(newStatus === "1" ? 'Material Activated' : 'Material Inactivated', {
+                icon: '🛠️',
+                style: { borderRadius: '15px', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.05em' }
+            });
+        } catch (error) {
+            console.error(error);
+            toast.error('Failed to toggle material status');
+        }
+    };
+
+    // Helper Toggle Component
+    const ToggleSwitch = ({ active, onToggle, label }) => (
+        <div className="flex items-center gap-3">
+            {label && <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>}
+            <button
+                onClick={onToggle}
+                className={`relative w-12 h-6 rounded-full transition-all duration-300 ${active ? 'bg-emerald-500 shadow-lg shadow-emerald-500/20' : 'bg-slate-300 dark:bg-slate-700'}`}
+            >
+                <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-all duration-300 transform ${active ? 'translate-x-6 scale-110' : 'translate-x-0'}`}></div>
+            </button>
+        </div>
+    );
 
     useEffect(() => {
         if (id) {
@@ -121,7 +216,13 @@ const ProductDetails = () => {
                                 <span className="material-symbols-outlined">arrow_back</span>
                             </Link>
                             <div className="min-w-0">
-                                <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter truncate">{product.product_name}</h1>
+                                <div className="flex items-center gap-3">
+                                    <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter truncate">{product.product_name}</h1>
+                                    <ToggleSwitch
+                                        active={product.product_is_active == "1"}
+                                        onToggle={handleToggleProductStatus}
+                                    />
+                                </div>
                                 <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] md:text-xs font-bold text-slate-500 uppercase tracking-wider">
                                     <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-slate-600 dark:text-slate-300">ID: {product.id}</span>
                                     <span>•</span>
@@ -194,8 +295,15 @@ const ProductDetails = () => {
                                     <div className="w-16 h-16 rounded-2xl bg-rose-50 flex items-center justify-center text-rose-500">
                                         <span className="material-symbols-outlined text-3xl">info</span>
                                     </div>
-                                    <div>
-                                        <h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter">Fabric Information</h2>
+                                    <div className="flex-1">
+                                        <div className="flex items-center justify-between gap-4">
+                                            <h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter">Fabric Information</h2>
+                                            <ToggleSwitch
+                                                label={material.material_is_active == "1" ? "Active" : "Inactive"}
+                                                active={material.material_is_active == "1"}
+                                                onToggle={() => handleToggleMaterialStatus(material.id, material.material_is_active)}
+                                            />
+                                        </div>
                                         <p className="text-sm font-medium text-slate-500">{material.material_identity || material.material_name || material.name}</p>
                                     </div>
                                 </div>
@@ -319,17 +427,24 @@ const ProductDetails = () => {
                                                             <td className="px-8 py-4 text-center text-slate-400 line-through">₹{parseFloat(pr.actual_price).toFixed(0)}</td>
                                                             <td className="px-8 py-4 text-center text-slate-900 dark:text-white font-black">₹{parseFloat(pr.discount_price).toFixed(0)}</td>
                                                             <td className="px-8 py-4 text-center">
-                                                                <span className={`px-2 py-1 rounded text-[10px] ${pr.qty > 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-                                                                    {pr.qty > 0 ? `${pr.qty} IN STOCK` : 'OUT OF STOCK'}
-                                                                </span>
+                                                                <div className="flex flex-col items-center gap-1">
+                                                                    <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${pr.out_of_stock == "1" ? 'bg-rose-50 text-rose-500' : (pr.qty > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-500')}`}>
+                                                                        {pr.out_of_stock == "1" ? 'Out of Stock' : (pr.qty > 0 ? 'In Stock' : 'Out of Stock')}
+                                                                    </span>
+                                                                    {pr.qty > 0 && (
+                                                                        <span className="text-[10px] font-bold text-slate-400">Qty: {pr.qty}</span>
+                                                                    )}
+                                                                </div>
                                                             </td>
                                                             <td className="px-8 py-4 text-center">
                                                                 <button
-                                                                    onClick={() => handleMakeOutOfStock(pr.id)}
-                                                                    className={`p-2 rounded-lg transition-all text-rose-500 hover:bg-rose-50`}
-                                                                    title="Make Out of Stock"
+                                                                    onClick={() => handleToggleStock(pr)}
+                                                                    className={`p-2 rounded-lg transition-all ${pr.out_of_stock == "1" ? 'text-emerald-500 hover:bg-emerald-50' : 'text-rose-500 hover:bg-rose-50'}`}
+                                                                    title={pr.out_of_stock == "1" ? "Remove Out of Stock" : "Make Out of Stock"}
                                                                 >
-                                                                    <span className="material-symbols-outlined text-lg">block</span>
+                                                                    <span className="material-symbols-outlined text-lg">
+                                                                        {pr.out_of_stock == "1" ? 'check_circle' : 'block'}
+                                                                    </span>
                                                                 </button>
                                                             </td>
                                                         </tr>
@@ -369,17 +484,19 @@ const ProductDetails = () => {
                                                             <td className="px-8 py-4 text-center text-slate-400 line-through">₹{parseFloat(pr.actual_price).toFixed(0)}</td>
                                                             <td className="px-8 py-4 text-center text-rose-600 font-black">₹{parseFloat(pr.discount_price).toFixed(0)}</td>
                                                             <td className="px-8 py-4 text-center">
-                                                                <span className={`px-2 py-1 rounded text-[10px] ${pr.stock_status !== 'out_of_stock' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-                                                                    {pr.stock_status !== 'out_of_stock' ? 'AVAILABLE' : 'OUT OF STOCK'}
+                                                                <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${pr.out_of_stock == "1" ? 'bg-rose-50 text-rose-500' : 'bg-emerald-50 text-emerald-600'}`}>
+                                                                    {pr.out_of_stock == "1" ? 'Out of Stock' : 'Available'}
                                                                 </span>
                                                             </td>
                                                             <td className="px-8 py-4 text-center">
                                                                 <button
-                                                                    onClick={() => handleMakeOutOfStock(pr.id)}
-                                                                    className={`p-2 rounded-lg transition-all text-rose-500 hover:bg-rose-50`}
-                                                                    title="Make Out of Stock"
+                                                                    onClick={() => handleToggleStock(pr)}
+                                                                    className={`p-2 rounded-lg transition-all ${pr.out_of_stock == "1" ? 'text-emerald-500 hover:bg-emerald-50' : 'text-rose-500 hover:bg-rose-50'}`}
+                                                                    title={pr.out_of_stock == "1" ? "Remove Out of Stock" : "Make Out of Stock"}
                                                                 >
-                                                                    <span className="material-symbols-outlined text-lg">block</span>
+                                                                    <span className="material-symbols-outlined text-lg">
+                                                                        {pr.out_of_stock == "1" ? 'check_circle' : 'block'}
+                                                                    </span>
                                                                 </button>
                                                             </td>
                                                         </tr>
@@ -526,6 +643,60 @@ const ProductDetails = () => {
                             alt="Preview"
                             className="max-w-full max-h-full object-contain rounded-2xl shadow-2xl border border-white/10"
                         />
+                    </div>
+                </div>
+            )}
+            {/* 6. CONFIRMATION MODAL */}
+            {confirmModal.isOpen && (
+                <div className={`fixed inset-0 z-[100] flex items-center justify-center px-4 transition-all duration-300 ${confirmModal.isClosing ? 'opacity-0' : 'opacity-100'}`}>
+                    <div
+                        className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
+                        onClick={closeModal}
+                    ></div>
+                    <div className={`relative bg-white dark:bg-slate-800 rounded-[2.5rem] shadow-2xl border border-white/20 w-full max-w-sm overflow-hidden transition-all duration-300 ${confirmModal.isClosing ? 'scale-95 translate-y-4 opacity-0' : 'scale-100 translate-y-0 opacity-100 animate-in zoom-in-95 duration-300'}`}>
+                        <div className="p-8 text-center">
+                            <div className={`w-20 h-20 ${confirmModal.type === 'make' ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-500' : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-500'} rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-inner ring-4 ${confirmModal.type === 'make' ? 'ring-rose-50/50' : 'ring-emerald-50/50'}`}>
+                                <span className="material-symbols-outlined text-4xl animate-pulse">
+                                    {confirmModal.type === 'make' ? 'inventory_2' : 'inventory'}
+                                </span>
+                            </div>
+                            <h3 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter mb-2">
+                                {confirmModal.type === 'make' ? 'Mark as Out?' : 'Restore Stock?'}
+                            </h3>
+                            <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-6 leading-relaxed">
+                                {confirmModal.type === 'make'
+                                    ? 'Are you sure you want to mark this item as out of stock?'
+                                    : 'Restore availability for this item on the storefront.'}
+                            </p>
+
+                            {confirmModal.type === 'remove' && confirmModal.priceTypeId != 0 && (
+                                <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1 text-left pl-2">Available Quantity (Optional)</label>
+                                    <input
+                                        type="number"
+                                        value={confirmModal.qty}
+                                        onChange={(e) => setConfirmModal(prev => ({ ...prev, qty: e.target.value }))}
+                                        className="w-full px-5 py-3 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm font-black focus:ring-2 focus:ring-emerald-500/20 outline-none transition-all"
+                                        placeholder="Enter qty..."
+                                    />
+                                </div>
+                            )}
+
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={closeModal}
+                                    className="flex-1 px-6 py-3.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={executeStockAction}
+                                    className={`flex-1 px-6 py-3.5 ${confirmModal.type === 'make' ? 'bg-rose-500 shadow-rose-500/25' : 'bg-emerald-500 shadow-emerald-500/25'} text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:opacity-90 transition-all shadow-lg active:scale-95`}
+                                >
+                                    Confirm
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
