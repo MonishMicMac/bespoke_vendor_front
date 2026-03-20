@@ -105,7 +105,7 @@ const SignUp = () => {
                                     )}
 
                                     <div className="w-20 h-20 rounded-full overflow-hidden bg-white shadow-sm border border-gray-100 p-1">
-                                        <img src="http://3.7.112.78/images/desginer.png" alt="Designer" className="w-full h-full object-cover rounded-full" />
+                                        <img src="http://43.204.68.67/images/desginer.png" alt="Designer" className="w-full h-full object-cover rounded-full" />
                                     </div>
                                     <div className="text-center">
                                         <div className={`text-lg font-bold mb-1 ${formData.role === 'designer' ? 'text-pink-500' : 'text-slate-700'}`}>Designer</div>
@@ -127,7 +127,7 @@ const SignUp = () => {
                                     )}
 
                                     <div className="w-20 h-20 rounded-full overflow-hidden bg-white shadow-sm border border-gray-100 p-1">
-                                        <img src="http://3.7.112.78/images/shop.png" alt="Shop" className="w-full h-full object-cover rounded-full" />
+                                        <img src="http://43.204.68.67/images/shop.png" alt="Shop" className="w-full h-full object-cover rounded-full" />
                                     </div>
                                     <div className="text-center">
                                         <div className={`text-lg font-bold mb-1 ${formData.role === 'shop' ? 'text-pink-500' : 'text-slate-700'}`}>Shop Owner</div>

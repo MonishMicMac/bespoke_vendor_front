@@ -14,7 +14,7 @@ const ProductDetails = () => {
     const [confirmModal, setConfirmModal] = useState({ isOpen: false, isClosing: false, priceId: null, type: 'make', qty: '', priceTypeId: null });
 
     // API Base URL for relative images
-    const ASSET_BASE_URL = 'http://3.7.112.78/bespoke/public';
+    const ASSET_BASE_URL = 'http://43.204.68.67/bespoke/public';
 
     const getFullImageUrl = (path) => {
         if (!path) return null;

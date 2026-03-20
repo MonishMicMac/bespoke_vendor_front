@@ -1,4 +1,5 @@
 import React from 'react';
+import Step3Measurements from './Step3Measurements';
 
 const Step1BasicInfo = ({
     productName, setProductName,
@@ -8,7 +9,13 @@ const Step1BasicInfo = ({
     productDescription, setProductDescription,
     fetchMeasurementsByGender, fetchCategoriesByGender,
     wearTypes, selectedWearType, handleWearTypeChange,
-    rooms, selectedRoomId, setSelectedRoomId
+    rooms, selectedRoomId, setSelectedRoomId,
+    isCustomizable, setIsCustomizable,
+    // Measurement Props
+    availableMeasurements, selectedMeasurementIds, toggleMeasurement,
+    selectedSizes, toggleSize,
+    sizeMeasurements, handleMeasurementChange,
+    AVAILABLE_SIZES, sizeNumbers
 }) => {
     return (
         <div className="space-y-8">
@@ -25,6 +32,39 @@ const Step1BasicInfo = ({
                 </div>
 
                 <div className="space-y-6">
+                    {/* Product Type Selection: Customizable vs Ready Made */}
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Product Customization</label>
+                        <div className="flex gap-4">
+                            <button
+                                type="button"
+                                onClick={() => setIsCustomizable(1)}
+                                className={`flex items-center gap-3 px-6 py-4 rounded-xl border-2 transition-all duration-300 text-left flex-1 ${isCustomizable === 1 ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-500/10 shadow-md' : 'border-slate-100 dark:border-slate-700 bg-slate-50/50 hover:border-slate-300'}`}
+                            >
+                                <div className={`p-2 rounded-full ${isCustomizable === 1 ? 'bg-rose-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`}>
+                                    <span className="material-symbols-outlined">design_services</span>
+                                </div>
+                                <div>
+                                    <h3 className={`text-sm font-bold ${isCustomizable === 1 ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400'}`}>Customizable</h3>
+                                    <p className="text-[10px] text-slate-400">Measurements can be manually selected</p>
+                                </div>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setIsCustomizable(0)}
+                                className={`flex items-center gap-3 px-6 py-4 rounded-xl border-2 transition-all duration-300 text-left flex-1 ${isCustomizable === 0 ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-500/10 shadow-md' : 'border-slate-100 dark:border-slate-700 bg-slate-50/50 hover:border-slate-300'}`}
+                            >
+                                <div className={`p-2 rounded-full ${isCustomizable === 0 ? 'bg-rose-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`}>
+                                    <span className="material-symbols-outlined">inventory_2</span>
+                                </div>
+                                <div>
+                                    <h3 className={`text-sm font-bold ${isCustomizable === 0 ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400'}`}>Ready Made</h3>
+                                    <p className="text-[10px] text-slate-400">Standard measurements auto-selected</p>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
                     {/* Room Selection */}
                     <div>
                         <label className="block text-sm font-black text-slate-700 dark:text-slate-300 mb-3 uppercase tracking-tight">Select Room</label>
@@ -85,7 +125,7 @@ const Step1BasicInfo = ({
                     <div>
                         <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Gender</label>
                         <div className="flex gap-3">
-                            {['Female', 'Male', 'Unisex'].map(g => (
+                            {['Female', 'Male', 'Unisex', 'Kids'].map(g => (
                                 <button
                                     key={g}
                                     type="button"
@@ -145,8 +185,24 @@ const Step1BasicInfo = ({
                         </div>
                     </div>
                 </div>
-            </section>
-        </div>
+            </section >
+
+            {/* Measurement Selection (Moved from Step 2/3) */}
+            <div className="pt-4">
+                <Step3Measurements
+                    availableMeasurements={availableMeasurements}
+                    selectedMeasurementIds={selectedMeasurementIds}
+                    toggleMeasurement={toggleMeasurement}
+                    isCustomizable={isCustomizable}
+                    selectedSizes={selectedSizes}
+                    toggleSize={toggleSize}
+                    sizeMeasurements={sizeMeasurements}
+                    handleMeasurementChange={handleMeasurementChange}
+                    AVAILABLE_SIZES={AVAILABLE_SIZES}
+                    sizeNumbers={sizeNumbers}
+                />
+            </div>
+        </div >
     );
 };
 

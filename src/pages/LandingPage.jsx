@@ -45,7 +45,7 @@ const LandingPage = () => {
                <div className="hero-image-wrapper">
   <div className="rounded-xl overflow-hidden">
     <img
-      src="http://3.7.112.78/images/landingpage.png"
+      src="http://43.204.68.67/images/landingpage.png"
       alt="Team working"
       className="w-full h-auto object-cover"
     />

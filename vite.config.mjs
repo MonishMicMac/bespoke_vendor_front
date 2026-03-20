@@ -31,7 +31,7 @@ export default defineConfig(({ mode }) => {
       host: true,
       proxy: {
         '/api': {
-          target: 'http://3.7.112.78/bespoke/public',
+          target: 'http://43.204.68.67/bespoke/public',
           changeOrigin: true,
           secure: false,
           credentials: true,

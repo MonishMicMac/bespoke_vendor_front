@@ -53,7 +53,7 @@ const Product = () => {
     // [{ id, identity, description, material_type_id, images: { main, front, back, left, right, extras: [] }, previews: { ... }, availability: { custom: true, ready: false } }]
     const [fabrics, setFabrics] = useState([]);
     // isCustomizable is now derived from fabrics availability
-    const isCustomizable = fabrics.some(f => f.availability?.custom) ? 1 : 0;
+    const [isCustomizable, setIsCustomizable] = useState(0);
     const [materialTypes, setMaterialTypes] = useState([]); // From API
 
     // Old Fabric Modal states removed as we use inline cards now
@@ -101,7 +101,7 @@ const Product = () => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }; // Track if subcat mapping exists
 
-    const ASSET_BASE_URL = 'http://3.7.112.78/bespoke/public'; // Helper
+    const ASSET_BASE_URL = 'http://43.204.68.67/bespoke/public'; // Helper
     const getFullImageUrl = (path) => {
         if (!path) return null;
         if (path.startsWith('http')) return path;
@@ -441,6 +441,9 @@ const Product = () => {
                 await fetchMeasurementsByGender(normalized);
                 await fetchCategoriesByGender(normalized);
             }
+
+            // Set Customizable Mode from Backend
+            setIsCustomizable(Number(p.is_customizable) || 0);
 
             setIsAlter(Number(p.is_alter) || 0);
             setAlterCharge(p.alter_charge || '');
@@ -1278,6 +1281,17 @@ const Product = () => {
                             fetchMeasurementsByGender={fetchMeasurementsByGender} fetchCategoriesByGender={fetchCategoriesByGender}
                             wearTypes={wearTypes} selectedWearType={selectedWearType} handleWearTypeChange={handleWearTypeChange}
                             rooms={rooms} selectedRoomId={selectedRoomId} setSelectedRoomId={setSelectedRoomId}
+                            isCustomizable={isCustomizable} setIsCustomizable={setIsCustomizable}
+                            // Measurement Props (Moved from Step 2)
+                            availableMeasurements={availableMeasurements}
+                            selectedMeasurementIds={selectedMeasurementIds}
+                            toggleMeasurement={toggleMeasurement}
+                            selectedSizes={selectedSizes}
+                            toggleSize={toggleSize}
+                            sizeMeasurements={sizeMeasurements}
+                            handleMeasurementChange={handleMeasurementChange}
+                            AVAILABLE_SIZES={AVAILABLE_SIZES}
+                            sizeNumbers={sizeNumbers}
                         />
                     )}
 
@@ -1299,17 +1313,6 @@ const Product = () => {
                             handleRemoveReadyRow={handleRemoveReadyRow}
                             pricingData={pricingData}
                             handlePricingChange={handlePricingChange}
-                            // Measurement Props (Moved to Step 2 Tabs)
-                            availableMeasurements={availableMeasurements}
-                            selectedMeasurementIds={selectedMeasurementIds}
-                            toggleMeasurement={toggleMeasurement}
-                            isCustomizable={isCustomizable}
-                            selectedSizes={selectedSizes}
-                            toggleSize={toggleSize}
-                            sizeMeasurements={sizeMeasurements}
-                            handleMeasurementChange={handleMeasurementChange}
-                            activeTab={configActiveTab}
-                            setActiveTab={setConfigActiveTab}
                         />
                     )}
 

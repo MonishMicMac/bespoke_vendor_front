@@ -31,8 +31,8 @@ axiosInstance.interceptors.response.use(
     (response) => response,
     (error) => {
         if (error.response && [401, 403].includes(error.response.status)) {
-            // Cookies.remove('vendor_id');
-            // window.location.href = '/vendor/login';
+            Cookies.remove('vendor_id');
+            window.location.href = '/vendor/login';
         }
         return Promise.reject(error);
     }
